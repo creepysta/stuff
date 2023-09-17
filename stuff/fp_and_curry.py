@@ -7,7 +7,7 @@ def pair(x):
         return Pair(x, y)
     return fn
 
-print(pair(10)(20))
+print(f"{pair(10)(20)=}")
 
 def head(pair):
     return pair.first
@@ -157,7 +157,52 @@ xs_3_200 = range(3)(200)
 print(f"{list_to_array(mersenne(sieve(xs_3_200)))=}")
 
 
-# TODO: maybe actually make the `Pair` lazy where the tail is itself 
+def fold_left(func):
+  def fold(xs):
+    def accm(acc):
+      if xs is None:
+        return acc
+
+      return fold(tail(xs))(func(head(xs), acc))
+    return accm
+  return fold
+
+def add_pow(x, acm):
+  acm += x ** 2
+  return acm
+
+print(f"{fold_left(add_pow)(xs_5)(0)=}")
+
+def sublist(x, acc):
+  if len(acc) == 0:
+    acc = [[],[]]
+  if x % 2 == 0:
+    acc[0].append(x)
+  else:
+    acc[1].append(x)
+
+  return acc
+
+xs_15 = range(1)(15)
+print(f"{fold_left(sublist)(xs_15)([])=}")
+
+def reduce(func):
+  acc = None
+  def _reduce(xs):
+    nonlocal acc
+    if xs is None:
+      return acc
+    if acc is None:
+      acc = 0 # head(xs)
+
+    return fold_left(func)(xs)(acc)
+  return _reduce
+
+
+print(f"{reduce(lambda x1, x2: x1+x2 )(xs_10)=}")
+
+
+# TODO: maybe actually make the `Pair` lazy where the tail is itself
 # a function which needs to be called to be evaluated.
 
 
@@ -197,5 +242,5 @@ list_to_array(take( mfilter(lambda x: x%2 == 1)(xs_10))(3))=[1, 3, 5]
 list_to_array(sieve(xs_2_60))=[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41,
 43, 47, 53, 59]
 
-list_to_array(mersenne(sieve(xs_3_200)))=[3, 7, 31, 127] 
+list_to_array(mersenne(sieve(xs_3_200)))=[3, 7, 31, 127]
 """
