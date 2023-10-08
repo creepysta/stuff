@@ -4,7 +4,7 @@ Importing the other types for annotations are not required because of
 a ChainMap
 """
 
-from contract import Base
+from contract import Base, PositiveInteger
 
 # the `checked` decorator captures the globals for a function and handles the
 # annotations, that's why module level annotations will also work for

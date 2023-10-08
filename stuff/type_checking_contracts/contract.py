@@ -127,9 +127,10 @@ class Base(metaclass=BaseMeta):
     for name, val in vars(cls).items():
       if callable(val):
         setattr(cls, name, checked(val))
+
     # Instantiate contracts
     for name, val in cls.__annotations__.items():
-      contract = val()  # because this is being used as descriptors
+      contract = val()  # Similar to name = Integer() in Player1 class
       contract.__set_name__(cls, name)
       setattr(cls, name, contract)
 
