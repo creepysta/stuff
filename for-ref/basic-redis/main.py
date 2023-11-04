@@ -67,102 +67,100 @@ def parse_crlf(data: str) -> Generator[str, None, None]:
         token += ch
 
 
-def _next(gen: Generator):
+def _next(gen: Generator) -> str | None:
     try:
         return next(gen)
     except StopIteration:
-        raise StopIteration("Not enough values to unpack")
+        return None
 
 
-def next_token(data: str | Generator) -> tuple[str, Generator[str, None, None]]:
-    match data:
-        case Generator():
-            return _next(data), data
-        case str():
-            gen = parse_crlf(data)
-            return _next(gen), gen
+def next_token(data: Generator) -> str | None:
+    return _next(data)
+
+
+def parse_int(token):
+    match (token[0], token[1:]):
+        case ('+', rest):
+            return int(rest)
+        case ('-', rest):
+            return -int(rest)
         case _:
-            raise ValueError(
-                "Invalid input, token can be only of type str | Generator"
-                f" {data=!r}"
-            )
+            return int(token)
 
 
-def parse_int(data: str) -> tuple[int, Generator[str, None, None]]:
-    token, rest = next_token(data)
-    return int(token), rest
-
-
-def parse_bool(data: str) -> tuple[bool, Generator[str, None, None]]:
-    token, rest = next_token(data)
+def parse_bool(token):
     match token:
         case 't':
-            return True, rest
+            return True
         case 'f':
-            return False, rest
-        case _:
-            raise ValueError(f"Given input is not boolean : {data=}")
+            return False
+        case x:
+            raise ValueError(f"Given input is not boolean : {x=}")
 
 
-def parse_array(data: str) -> tuple[list, Generator[str, None, None]]:
-    token, rest = next_token(data)
-    num_items = int(token)
+def parse_bulkstrings(sz, tokens):
+    token = next(tokens)
+    assert len(token) == sz
+    return token
+
+
+def parse_array(sz, tokens) -> list:
+    token = next_token(tokens)
     rv = []
-    for _ in range(num_items):
-        token: str
-        try:
-            token, rest = next_token(rest)
-        except StopIteration:
-            raise Exception(f"Client sent less items than promised in {data=}")
+    if token is None:
+        return []
 
-        num_items -= 1
-        parsed_token, _ = parse_data(token)
+    for _ in range(sz):
+        parsed_token = parse_data(tokens)
         rv.append(parsed_token)
 
-    return rv, rest
+    return rv
 
 
 # TODO: make a parser for reading nested data
-def parse_data(data: str):
-    match data.split():
-        case ["+", _]:
+def parse_data(tokens):
+    token = next_token(tokens)
+    if token is None:
+        return
+
+    match (token[0], token[1:]):
+        case ("+", _):
             # return simple_strings()
             pass
-        case ["-", _]:
+        case ("-", _):
             # return simple_errors()
             pass
-        case [":", _]:
-            return parse_int(data)
-        case ["_", _]:
+        case (":", rest):
+            return parse_int(rest)
+        case ("_", _):
             # return nulls()
             pass
-        case ["#", _]:
-            return parse_bool(data)
-        case [",", _]:
+        case ("#", rest):
+            return parse_bool(rest)
+        case (",", _):
             # return doubles()
             pass
-        case ["(", _]:
+        case ("(", _):
             # return big_numbers()
             pass
-        case ["!", _]:
+        case ("!", _):
             # return bulk_errors()  # Simple
             pass
-        case ["$", _]:
-            # return bulk_strings()
-            pass
-        case ["*", rest]:
-            got = parse_array(rest)
+        case ("$", rest):
+            return parse_bulkstrings(int(rest), tokens)
+        case ("*", rest):
+            got = parse_array(int(rest), tokens)
             return got
-        case ["=", _]:
+        case ("=", _):
             # return verbatim_strings()
             pass
-        case ["%", _]:
+        case ("%", _):
             # return maps()
             pass
-        case ["~", _]:
+        case ("~", _):
             # return sets()
             pass
-        case [">", _]:
+        case (">", _):
             # return pushes()   # Agg
             pass
         case _:
@@ -179,10 +177,16 @@ def read_data(client: socket.socket) -> str:
     return data
 
 
+def get_response(data):
+    tokens = parse_crlf(data)
+    ctype, res = parse_data(tokens)
+    return ctype, ""
+
+
 def handle_client(client: socket.socket):
     while data := read_data(client):
         print(f"{data=}")
-        ctype, res = parse_data(data)
+        ctype, res = get_response(data)
         print(f"{res=}")
         client.sendall(res.encode("utf-8"))
         if ctype is None:
