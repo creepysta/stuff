@@ -20,7 +20,8 @@ class ErrorType(Enum):
 
 
 class Base:
-    def __repr__(self):
+    @property
+    def _margs(self):
         args = ",".join(
             [
                 f"{k}={v!r}"
@@ -28,10 +29,16 @@ class Base:
                 if not (k.startswith("_") or hasattr(self, k))
             ]
         )
-        cons = f"{type(self).__name__}({args})"
+        return args
+
+    def __repr__(self):
+        cons = f"{type(self).__name__}({self._margs})"
         return cons
 
     def __eq__(self, o):
+        if not isinstance(o, type(self)):
+            raise NotImplementedError()
+
         ok = True
         for k, v in vars(self).items():
             if not hasattr(self, k):
@@ -40,6 +47,10 @@ class Base:
             ok = ok and (getattr(o, k) == v)
 
         return ok
+
+    def __hash__(self):
+        args = self._margs
+        return hash(args)
 
 
 class Error(Base):
@@ -60,10 +71,13 @@ class BulkError(Error):
         return f"!{self.sz}\r\n-Err: {self.msg}\r\n"
 
 
-class BulkString(str, Base):
-    def __init__(self, sz, *args):
+class BulkString(Base):
+    def __init__(self, sz, data):
         self.sz = sz
-        super().__init__(*args)
+        self.data = data
+
+    def __str__(self):
+        return f"${self.sz}\r\n{self.data}\r\n"
 
 
 def serve(host: str, port: int):
@@ -241,15 +255,15 @@ def parse_data(tokens):
 
 
 def serialize_int(val: int) -> str:
-    return ":{val}\r\n".format(val=val)
+    return ":{val}\r\n".format(val=str(val))
 
 
 def serialize_str(val: str) -> str:
     return "+{val}\r\n".format(val=val)
 
 
-def serialize_bulk_str(val: str) -> str:
-    return "${sz}\r\n{val}\r\n".format(sz=len(val), val=val)
+def serialize_bulk_str(val: BulkString) -> str:
+    return str(val)
 
 
 def serialize_bool(val: bool) -> str:
@@ -339,11 +353,26 @@ def read_data(client: socket.socket) -> str:
     return data
 
 
+def handle_command(command, body):
+    match command.upper():
+        case "ECHO":
+            rv = serialize_data(body)
+            return CommandType.Echo, rv
+        case "PING":
+            return CommandType.Ping, serialize_data("PONG")
+        case _:
+            return None, serialize_error(Error("Invalid command"))
+
+
 def get_response(data):
     tokens = parse_crlf(data)
     res = parse_data(tokens)
-    print(f"{res=}")
-    return None, ""
+    match res:
+        case list() if len(res) > 1:
+            rv = handle_command(res[0], res[1:])
+            return rv
+        case _:
+            return None, f"-Err: Can't respond to unknown input {data=}\r\n"
 
 
 def handle_client(client: socket.socket):
