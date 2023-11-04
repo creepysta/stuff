@@ -72,12 +72,28 @@ class BulkError(Error):
 
 
 class BulkString(Base):
-    def __init__(self, sz, data):
+    def __init__(self, sz: int, data: str):
         self.sz = sz
         self.data = data
 
     def __str__(self):
         return f"${self.sz}\r\n{self.data}\r\n"
+
+    def __eq__(self, o):
+        if isinstance(o, str):
+            return o == self.data
+
+        return super().__eq__(o)
+
+    def upper(self):
+        return self.data.upper()
+
+    # def __getattr__(self, key):
+    #     print(f"getattr captured {key=}")
+    #     if hasattr(self, key):
+    #         return getattr(self, key)
+
+    #     return getattr(self.data, key)()
 
 
 def serve(host: str, port: int):
@@ -326,7 +342,7 @@ def serialize_data(data) -> str:
         case set():
             return serialize_set(data)
         case BulkError():
-            return serialize_bulk_errors(data)  # Simple
+            return serialize_bulk_error(data)  # Simple
         case Error():
             return serialize_error(data)
         # case float():
@@ -353,7 +369,7 @@ def read_data(client: socket.socket) -> str:
     return data
 
 
-def handle_command(command, body):
+def handle_command(command, body=None):
     match command.upper():
         case "ECHO":
             rv = serialize_data(body)
@@ -367,8 +383,9 @@ def handle_command(command, body):
 def get_response(data):
     tokens = parse_crlf(data)
     res = parse_data(tokens)
+    print(f"{res=}")
     match res:
-        case list() if len(res) > 1:
+        case list() if len(res) > 0:
             rv = handle_command(res[0], res[1:])
             return rv
         case _:
