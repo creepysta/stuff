@@ -19,6 +19,17 @@ class ErrorType(Enum):
     WrongType = "wrong_type_operation"
 
 
+class Error:
+    def __init__(self, msg: str):
+        self.msg = msg
+
+    def __str__(self):
+        return f"-Err: {self.msg}"
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.msg=})"
+
+
 def serve(host: str, port: int):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -57,11 +68,11 @@ def command_ping() -> tuple[CommandType, str]:
 def parse_crlf(data: str) -> Generator[str, None, None]:
     token = ""
     for ch in data:
-        if ch in ('\r'):
+        if ch in ("\r"):
             yield token
             token = ""
             continue
-        elif ch == '\n':
+        elif ch == "\n":
             continue
 
         token += ch
@@ -78,11 +89,15 @@ def next_token(data: Generator) -> str | None:
     return _next(data)
 
 
+def parse_nulls() -> None:
+    return None
+
+
 def parse_int(token):
     match (token[0], token[1:]):
-        case ('+', rest):
+        case ("+", rest):
             return int(rest)
-        case ('-', rest):
+        case ("-", rest):
             return -int(rest)
         case _:
             return int(token)
@@ -90,26 +105,27 @@ def parse_int(token):
 
 def parse_bool(token):
     match token:
-        case 't':
+        case "t":
             return True
-        case 'f':
+        case "f":
             return False
         case x:
             raise ValueError(f"Given input is not boolean : {x=}")
 
 
-def parse_bulkstrings(sz, tokens):
+def parse_bulkstrings(sz, tokens) -> str | None:
+    if sz == -1:
+        return None
     token = next(tokens)
     assert len(token) == sz
     return token
 
 
-def parse_array(sz, tokens) -> list:
-    token = next_token(tokens)
-    rv = []
-    if token is None:
-        return []
+def parse_array(sz, tokens) -> list | None:
+    if sz == -1:
+        return None
 
+    rv = []
     for _ in range(sz):
         parsed_token = parse_data(tokens)
         rv.append(parsed_token)
@@ -117,24 +133,38 @@ def parse_array(sz, tokens) -> list:
     return rv
 
 
-# TODO: make a parser for reading nested data
+def parse_maps(sz, tokens) -> dict:
+    rv = {}
+    for _ in range(sz):
+        key = parse_data(tokens)
+        val = parse_data(tokens)
+        rv[key] = val
+
+    return rv
+
+
+def parse_simple_strings(token):
+    return token
+
+
+def parse_errors(token):
+    return str(Error(token))
+
+
 def parse_data(tokens):
     token = next_token(tokens)
     if token is None:
         return
 
     match (token[0], token[1:]):
-        case ("+", _):
-            # return simple_strings()
-            pass
-        case ("-", _):
-            # return simple_errors()
-            pass
+        case ("+", rest):
+            return parse_simple_strings(rest)
+        case ("-", rest):
+            return parse_errors(rest)
         case (":", rest):
             return parse_int(rest)
         case ("_", _):
-            # return nulls()
-            pass
+            return parse_nulls()
         case ("#", rest):
             return parse_bool(rest)
         case (",", _):
@@ -149,14 +179,12 @@ def parse_data(tokens):
         case ("$", rest):
             return parse_bulkstrings(int(rest), tokens)
         case ("*", rest):
-            got = parse_array(int(rest), tokens)
-            return got
+            return parse_array(int(rest), tokens)
         case ("=", _):
             # return verbatim_strings()
             pass
-        case ("%", _):
-            # return maps()
-            pass
+        case ("%", rest):
+            return parse_maps(int(rest), tokens)
         case ("~", _):
             # return sets()
             pass
@@ -164,7 +192,7 @@ def parse_data(tokens):
             # return pushes()   # Agg
             pass
         case _:
-            return None, handle_err(data, None, ErrorType.InvalidData)
+            return None
 
 
 def read_data(client: socket.socket) -> str:
@@ -179,8 +207,9 @@ def read_data(client: socket.socket) -> str:
 
 def get_response(data):
     tokens = parse_crlf(data)
-    ctype, res = parse_data(tokens)
-    return ctype, ""
+    res = parse_data(tokens)
+    print(f"{res=}")
+    return None, ""
 
 
 def handle_client(client: socket.socket):
