@@ -19,15 +19,51 @@ class ErrorType(Enum):
     WrongType = "wrong_type_operation"
 
 
-class Error:
+class Base:
+    def __repr__(self):
+        args = ",".join(
+            [
+                f"{k}={v!r}"
+                for k, v in vars(self).items()
+                if not (k.startswith("_") or hasattr(self, k))
+            ]
+        )
+        cons = f"{type(self).__name__}({args})"
+        return cons
+
+    def __eq__(self, o):
+        ok = True
+        for k, v in vars(self).items():
+            if not hasattr(self, k):
+                continue
+
+            ok = ok and (getattr(o, k) == v)
+
+        return ok
+
+
+class Error(Base):
     def __init__(self, msg: str):
         self.msg = msg
 
     def __str__(self):
-        return f"-Err: {self.msg}"
+        return f"-Err: {self.msg}\r\n"
 
-    def __repr__(self):
-        return f"{self.__class__.__name__}({self.msg=})"
+
+class BulkError(Error):
+    def __init__(self, sz: int, msg: str):
+        self.sz = sz
+        super().__init__(msg)
+
+    def __str__(self):
+        # TODO: think of a clean way to test this
+        return f"!{self.sz}\r\n-Err: {self.msg}\r\n"
+
+
+class BulkString(str, Base):
+    def __init__(self, sz, *args):
+        self.sz = sz
+        super().__init__(*args)
 
 
 def serve(host: str, port: int):
@@ -113,12 +149,18 @@ def parse_bool(token):
             raise ValueError(f"Given input is not boolean : {x=}")
 
 
-def parse_bulkstrings(sz, tokens) -> str | None:
+def parse_bulk_strings(sz, tokens) -> BulkString | None:
     if sz == -1:
         return None
     token = next(tokens)
     assert len(token) == sz
-    return token
+    return BulkString(len(token), token)
+
+
+def parse_bulk_errors(sz, tokens) -> BulkError:
+    token = next(tokens)
+    assert len(token) == sz
+    return BulkError(sz, token)
 
 
 def parse_array(sz, tokens) -> list | None:
@@ -129,6 +171,15 @@ def parse_array(sz, tokens) -> list | None:
     for _ in range(sz):
         parsed_token = parse_data(tokens)
         rv.append(parsed_token)
+
+    return rv
+
+
+def parse_sets(sz, tokens) -> set:
+    rv = set()
+    for _ in range(sz):
+        parsed_token = parse_data(tokens)
+        rv.add(parsed_token)
 
     return rv
 
@@ -148,7 +199,7 @@ def parse_simple_strings(token):
 
 
 def parse_errors(token):
-    return str(Error(token))
+    return Error(token)
 
 
 def parse_data(tokens):
@@ -167,32 +218,115 @@ def parse_data(tokens):
             return parse_nulls()
         case ("#", rest):
             return parse_bool(rest)
-        case (",", _):
-            # return doubles()
-            pass
-        case ("(", _):
-            # return big_numbers()
-            pass
-        case ("!", _):
-            # return bulk_errors()  # Simple
-            pass
+        case ("!", rest):
+            return parse_bulk_errors(int(rest), tokens)  # Simple
         case ("$", rest):
-            return parse_bulkstrings(int(rest), tokens)
+            return parse_bulk_strings(int(rest), tokens)
         case ("*", rest):
             return parse_array(int(rest), tokens)
-        case ("=", _):
-            # return verbatim_strings()
-            pass
         case ("%", rest):
             return parse_maps(int(rest), tokens)
-        case ("~", _):
-            # return sets()
-            pass
-        case (">", _):
-            # return pushes()   # Agg
-            pass
+        case ("~", rest):
+            return parse_sets(int(rest), tokens)
+        # case (",", _):
+        #     # return doubles()
+        # case ("(", _):
+        #     # return big_numbers()
+        # case ("=", _):
+        #     # return verbatim_strings()
+        # case (">", _):
+        #     # return pushes()   # Agg
         case _:
             return None
+
+
+def serialize_int(val: int) -> str:
+    return ":{val}\r\n".format(val=val)
+
+
+def serialize_str(val: str) -> str:
+    return "+{val}\r\n".format(val=val)
+
+
+def serialize_bulk_str(val: str) -> str:
+    return "${sz}\r\n{val}\r\n".format(sz=len(val), val=val)
+
+
+def serialize_bool(val: bool) -> str:
+    return "#{val}\r\n".format(val="t" if val is True else "f")
+
+
+def serialize_null() -> str:
+    return "_\r\n"
+
+
+def serialize_dict(data: dict) -> str:
+    rv = f"%{len(data)}\r\n"
+    for key, val in data.items():
+        rv += serialize_data(key)
+        rv += serialize_data(val)
+
+    return rv
+
+
+def serialize_list(data: list) -> str:
+    rv = f"*{len(data)}\r\n"
+    for item in data:
+        rv += serialize_data(item)
+
+    return rv
+
+
+def serialize_set(data: set) -> str:
+    rv = f"~{len(data)}\r\n"
+    for item in data:
+        rv += serialize_data(item)
+
+    return rv
+
+
+def serialize_error(data: Error) -> str:
+    return str(data)
+
+
+def serialize_bulk_error(data: BulkError) -> str:
+    return str(data)
+
+
+def serialize_data(data) -> str:
+    match data:
+        case int():
+            return serialize_int(data)
+        case BulkString():
+            return serialize_bulk_str(data)
+        case str():
+            return serialize_str(data)
+        case bool():
+            return serialize_bool(data)
+        case None:
+            return serialize_null()
+        case dict():
+            return serialize_dict(data)
+        case list():
+            return serialize_list(data)
+        case set():
+            return serialize_set(data)
+        case BulkError():
+            return serialize_bulk_errors(data)  # Simple
+        case Error():
+            return serialize_error(data)
+        # case float():
+        #     return float():
+        # case ("(", _):
+        #     # return big_numbers()
+        # case ("=", _):
+        #     # return verbatim_strings()
+        # case ("~", _):
+        #     # return sets()
+        # case (">", _):
+        #    # return pushes()   # Agg
+        case _:
+            return serialize_null()
 
 
 def read_data(client: socket.socket) -> str:
