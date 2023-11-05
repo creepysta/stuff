@@ -3,14 +3,87 @@ import socket
 from enum import Enum
 from threading import Thread
 from typing import Generator
+from argparse import ArgumentParser
+
+
+class Redis:
+    def __init__(self):
+        self.store = {}
+
+    def set(self, key, val) -> str:
+        self.store[key] = val
+        return "OK"
+
+    def get(self, key: str):
+        return self.store.get(key)
+
+    def exists(self, keys: list) -> int:
+        return sum([key in self.store.keys() for key in keys])
+
+    def del_keys(self, keys: list) -> int:
+        rv = 0
+        for key in keys:
+            if key in self.store.keys():
+                rv += 1
+                del self.store[key]
+
+        return rv
+
+    def incr(self, key: str) -> int | None:
+        if not (self.get(key) is None or isinstance(self.get(key), int)):
+            return None
+
+        self.set(key, (self.get(key) or 0) + 1)
+        return self.get(key)  # type: ignore
+
+    def decr(self, key: str) -> int | None:
+        if not (self.get(key) is None or isinstance(self.get(key), int)):
+            return None
+
+        self.set(key, (self.get(key) or 0) - 1)
+        return self.get(key)  # type: ignore
+
+    def lpush(self, key: str, vals: list) -> int | None:
+        if not (self.get(key) is None or isinstance(self.get(key), list)):
+            return None
+
+        vals.reverse()
+        if self.get(key) is None:
+            self.set(key, [])
+
+        self.set(key, vals + self.get(key))  # type: ignore
+        return len(self.get(key))  # type: ignore
+
+    def rpush(self, key: str, vals: list) -> int | None:
+        if not (self.get(key) is None or isinstance(self.get(key), list)):
+            return None
+
+        if self.get(key) is None:
+            self.set(key, [])
+
+        self.set(key, self.get(key) + vals)  # type: ignore
+        return len(self.get(key))  # type: ignore
+
+    def save(self) -> str:
+        return "OK"
+
+
+store = Redis()
 
 
 class CommandType(Enum):
     NoOp = "NOOP"
     Ping = "PING"
+    Del = "DEL"
     Echo = "ECHO"
+    Exists = "EXISTS"
     Get = "GET"
     Set = "SET"
+    Incr = "INCR"
+    Decr = "DECR"
+    Save = "SAVE"
+    Lpush = "LPUSH"
+    Rpush = "RPUSH"
 
 
 class ErrorType(Enum):
@@ -20,13 +93,19 @@ class ErrorType(Enum):
 
 
 class Base:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+        super().__init__()
+
     @property
     def _margs(self):
         args = ",".join(
             [
                 f"{k}={v!r}"
-                for k, v in vars(self).items()
-                if not (k.startswith("_") or hasattr(self, k))
+                for k, v in vars(self).items()  # self.kwargs.items()
+                if not (k.startswith("_"))
             ]
         )
         return args
@@ -54,46 +133,48 @@ class Base:
 
 
 class Error(Base):
-    def __init__(self, msg: str):
+    def __init__(self, msg: str, **kwargs):
         self.msg = msg
+        super().__init__(msg=msg, **kwargs)
+
+    def ser(self):
+        return f"-Err: {self.msg}\r\n"
 
     def __str__(self):
-        return f"-Err: {self.msg}\r\n"
+        return self.msg
 
 
 class BulkError(Error):
-    def __init__(self, sz: int, msg: str):
+    def __init__(self, sz: int, msg: str, **kwargs):
         self.sz = sz
-        super().__init__(msg)
+        self.msg = msg
+        super().__init__(msg=msg, **kwargs)
 
-    def __str__(self):
-        # TODO: think of a clean way to test this
+    def ser(self):
         return f"!{self.sz}\r\n-Err: {self.msg}\r\n"
 
+    def __str__(self):
+        return self.msg
 
-class BulkString(Base):
+
+class BulkString(str):
+    def __new__(cls, sz: int, data: str):
+        # ref - https://stackoverflow.com/questions/7255655/how-to-subclass-str-in-python
+        cls.sz = sz
+        return super().__new__(cls, data)
+
     def __init__(self, sz: int, data: str):
         self.sz = sz
         self.data = data
 
     def __str__(self):
+        return self.data
+
+    def ser(self):
         return f"${self.sz}\r\n{self.data}\r\n"
 
-    def __eq__(self, o):
-        if isinstance(o, str):
-            return o == self.data
-
-        return super().__eq__(o)
-
-    def upper(self):
-        return self.data.upper()
-
-    # def __getattr__(self, key):
-    #     print(f"getattr captured {key=}")
-    #     if hasattr(self, key):
-    #         return getattr(self, key)
-
-    #     return getattr(self.data, key)()
+    def __repr__(self):
+        return f"{type(self).__name__}(sz={self.sz},data={self.data})"
 
 
 def serve(host: str, port: int):
@@ -279,7 +360,7 @@ def serialize_str(val: str) -> str:
 
 
 def serialize_bulk_str(val: BulkString) -> str:
-    return str(val)
+    return val.ser()
 
 
 def serialize_bool(val: bool) -> str:
@@ -316,11 +397,11 @@ def serialize_set(data: set) -> str:
 
 
 def serialize_error(data: Error) -> str:
-    return str(data)
+    return data.ser()
 
 
 def serialize_bulk_error(data: BulkError) -> str:
-    return str(data)
+    return data.ser()
 
 
 def serialize_data(data) -> str:
@@ -369,13 +450,64 @@ def read_data(client: socket.socket) -> str:
     return data
 
 
-def handle_command(command, body=None):
+def handle_command(command: str, body: list):
     match command.upper():
-        case "ECHO":
-            rv = serialize_data(body)
-            return CommandType.Echo, rv
-        case "PING":
+        case CommandType.Ping.value:
             return CommandType.Ping, serialize_data("PONG")
+        case CommandType.Echo.value:
+            rv = serialize_data(body[0])
+            return CommandType.Echo, rv
+        case CommandType.Exists.value:
+            resp = store.exists(body[1:])
+            rv = serialize_data(resp)
+            return CommandType.Exists, rv
+        case CommandType.Set.value:
+            resp = store.set(body[0], body[1])
+            rv = serialize_data(resp)
+            return CommandType.Set, rv
+        case CommandType.Get.value:
+            rv = serialize_data(store.get(body[0]))
+            return CommandType.Get, rv
+        case CommandType.Incr.value:
+            resp = store.incr(body[0])
+            rv = serialize_data(resp)
+            if resp is None:
+                rv = serialize_data(Error(
+                    f"Cannot increment data for key={body[0]}."
+                    f" Current value stored: {store.get(body[0])!r}"
+                ))
+            return CommandType.Incr, rv
+        case CommandType.Decr.value:
+            resp = store.decr(body[0])
+            rv = serialize_data(resp)
+            if resp is None:
+                rv = serialize_data(Error(
+                    f"Cannot decrement data for key={body[0]}."
+                    f" Current value stored: {store.get(body[0])!r}"
+                ))
+            return CommandType.Decr, rv
+        case CommandType.Lpush.value:
+            resp = store.lpush(body[0], body[1:])
+            rv = serialize_data(resp)
+            if resp is None:
+                rv = serialize_data(Error(
+                    f"Cannot perform LPUSH for key={body[0]}."
+                    f" Current value stored: {store.get(body[0])!r}"
+                ))
+            return CommandType.Lpush, rv
+        case CommandType.Rpush.value:
+            resp = store.rpush(body[0], body[1:])
+            rv = serialize_data(resp)
+            if resp is None:
+                rv = serialize_data(Error(
+                    f"Cannot perform RPUSH for key={body[0]}."
+                    f" Current value stored: {store.get(body[0])!r}"
+                ))
+            return CommandType.Rpush, rv
+        case CommandType.Save.value:
+            resp = store.save()
+            rv = serialize_data(resp)
+            return CommandType.Save, rv
         case _:
             return None, serialize_error(Error("Invalid command"))
 
@@ -404,12 +536,16 @@ def handle_client(client: socket.socket):
     client.close()
 
 
-def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!")
-    host = "localhost"
-    port = 6379
-    serve(host, port)
+def main(argv: list[str] | None = None):
+    parser = ArgumentParser()
+    parser.add_argument("--serve", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.serve:
+        host = "localhost"
+        port = 6379
+        print(f"Server listening on {host=}, {port=}")
+        serve(host, port)
 
 
 if __name__ == "__main__":
