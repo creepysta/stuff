@@ -1,6 +1,15 @@
 import pytest
 
-from main import BulkString, Error, parse_crlf, parse_data, serialize_data
+from main import (
+    BulkString,
+    CommandType,
+    Error,
+    Redis,
+    handle_command,
+    parse_crlf,
+    parse_data,
+    serialize_data,
+)
 
 int_data = [
     (":+123\r\n", 123),
@@ -61,6 +70,11 @@ set_data = [
         {1, 2, 3, 4, BulkString(5, "hello")},
     ),
 ]
+
+
+@pytest.fixture
+def store():
+    return Redis()
 
 
 @pytest.mark.parametrize("data,expected", int_data)
@@ -136,16 +150,125 @@ def test_ser_array():
 def test_ser_maps():
     data = {BulkString(5, "first"): 1, BulkString(6, "second"): "asd", 3: "third"}
     got = serialize_data(data)
-    expected = (
-        "%3\r\n$5\r\nfirst\r\n:1\r\n$6\r\nsecond\r\n+asd\r\n:3\r\n+third\r\n"
-    )
+    expected = "%3\r\n$5\r\nfirst\r\n:1\r\n$6\r\nsecond\r\n+asd\r\n:3\r\n+third\r\n"
     assert got == expected
 
 
-# TODO: think of ordering
 def test_ser_sets():
-    # data = {1, 2, 3}
-    # got = serialize_data(data)
-    # expected = "*5\r\n:1\r\n:2\r\n*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n_\r\n:-3\r\n"
-    # assert got == expected
-    pass
+    data = {1, 2, 3}
+    got = serialize_data(data)
+    parsed = parse_data(parse_crlf(got))
+    assert parsed == data
+
+
+def test_ping(store: Redis):
+    cmd_type, res = handle_command("PING", [], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Ping
+    assert rv == "PONG"
+
+
+def test_echo(store: Redis):
+    cmd_type, res = handle_command("ECHO", [BulkString(3, "Foo")], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Echo
+    assert rv == "Foo"
+
+
+def test_exists(store: Redis):
+    store.set("Foo", 2)
+    cmd_type, res = handle_command(
+        "EXISTS",
+        [BulkString(3, "Foo"), BulkString(3, "Bar"), BulkString(3, "baz")],
+        store,
+    )
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Exists
+    assert rv == 1
+
+
+def test_set(store: Redis):
+    cmd_type, res = handle_command("SET", [BulkString(3, "Foo"), 1], store)
+    rv = parse_data(parse_crlf(res))
+    assert store.get("Foo") == 1
+    assert cmd_type == CommandType.Set
+    assert rv == "OK"
+
+
+def test_get(store: Redis):
+    store.set("Foo", 999)
+    cmd_type, res = handle_command("GET", [BulkString(3, "Foo")], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Get
+    assert rv == 999
+
+
+def test_incr_no_prev(store: Redis):
+    cmd_type, res = handle_command("INCR", [BulkString(3, "Foo")], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Incr
+    assert rv == 1
+
+
+def test_incr_with_prev(store: Redis):
+    store.set("Foo", 1)
+    cmd_type, res = handle_command("INCR", [BulkString(3, "Foo")], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Incr
+    assert rv == 2
+
+
+def test_decr_no_prev(store: Redis):
+    cmd_type, res = handle_command("DECR", [BulkString(3, "Foo")], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Decr
+    assert rv == -1
+
+
+def test_decr_with_prev(store: Redis):
+    store.set("Foo", 999)
+    cmd_type, res = handle_command("DECR", [BulkString(3, "Foo")], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Decr
+    assert rv == 998
+
+
+def test_lpush_no_prev(store: Redis):
+    cmd_type, res = handle_command("LPUSH", [BulkString(3, "Foo"), 1, 2, 3], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Lpush
+    assert rv == 3
+    assert store.get("Foo") == [3, 2, 1]
+
+
+def test_lpush_with_prev(store: Redis):
+    store.set("Foo", [999])
+    cmd_type, res = handle_command("LPUSH", [BulkString(3, "Foo"), 1, 2, 3], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Lpush
+    assert rv == 4
+    assert store.get("Foo") == [3, 2, 1, 999]
+
+
+def test_rpush_no_prev(store: Redis):
+    cmd_type, res = handle_command("rpush", [BulkString(3, "Foo"), 1, 2, 3], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Rpush
+    assert rv == 3
+    assert store.get("Foo") == [1, 2, 3]
+
+
+def test_rpush_with_prev(store: Redis):
+    store.set("Foo", [999])
+    cmd_type, res = handle_command("rpush", [BulkString(3, "Foo"), 1, 2, 3], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Rpush
+    assert rv == 4
+    assert store.get("Foo") == [999, 1, 2, 3]
+
+
+def test_save(store: Redis):
+    cmd_type, res = handle_command("save", [], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Save
+    assert rv == "OK"

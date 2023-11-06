@@ -1,9 +1,9 @@
 # Uncomment this to pass the first stage
 import socket
+from argparse import ArgumentParser
 from enum import Enum
 from threading import Thread
 from typing import Generator
-from argparse import ArgumentParser
 
 
 class Redis:
@@ -175,18 +175,6 @@ class BulkString(str):
 
     def __repr__(self):
         return f"{type(self).__name__}(sz={self.sz},data={self.data})"
-
-
-def serve(host: str, port: int):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    addr = (host, port)
-    sock.bind(addr)
-    sock.listen(5)
-    while True:
-        client, _ = sock.accept()
-        t = Thread(target=handle_client, args=(client,))
-        t.start()
 
 
 def handle_err(cmd: str | None, args: list[str] | None, error_type: ErrorType) -> str:
@@ -450,7 +438,7 @@ def read_data(client: socket.socket) -> str:
     return data
 
 
-def handle_command(command: str, body: list):
+def handle_command(command: str, body: list, store: Redis):
     match command.upper():
         case CommandType.Ping.value:
             return CommandType.Ping, serialize_data("PONG")
@@ -458,7 +446,7 @@ def handle_command(command: str, body: list):
             rv = serialize_data(body[0])
             return CommandType.Echo, rv
         case CommandType.Exists.value:
-            resp = store.exists(body[1:])
+            resp = store.exists(body)
             rv = serialize_data(resp)
             return CommandType.Exists, rv
         case CommandType.Set.value:
@@ -472,37 +460,45 @@ def handle_command(command: str, body: list):
             resp = store.incr(body[0])
             rv = serialize_data(resp)
             if resp is None:
-                rv = serialize_data(Error(
-                    f"Cannot increment data for key={body[0]}."
-                    f" Current value stored: {store.get(body[0])!r}"
-                ))
+                rv = serialize_data(
+                    Error(
+                        f"Cannot increment data for key={body[0]}."
+                        f" Current value stored: {store.get(body[0])!r}"
+                    )
+                )
             return CommandType.Incr, rv
         case CommandType.Decr.value:
             resp = store.decr(body[0])
             rv = serialize_data(resp)
             if resp is None:
-                rv = serialize_data(Error(
-                    f"Cannot decrement data for key={body[0]}."
-                    f" Current value stored: {store.get(body[0])!r}"
-                ))
+                rv = serialize_data(
+                    Error(
+                        f"Cannot decrement data for key={body[0]}."
+                        f" Current value stored: {store.get(body[0])!r}"
+                    )
+                )
             return CommandType.Decr, rv
         case CommandType.Lpush.value:
             resp = store.lpush(body[0], body[1:])
             rv = serialize_data(resp)
             if resp is None:
-                rv = serialize_data(Error(
-                    f"Cannot perform LPUSH for key={body[0]}."
-                    f" Current value stored: {store.get(body[0])!r}"
-                ))
+                rv = serialize_data(
+                    Error(
+                        f"Cannot perform LPUSH for key={body[0]}."
+                        f" Current value stored: {store.get(body[0])!r}"
+                    )
+                )
             return CommandType.Lpush, rv
         case CommandType.Rpush.value:
             resp = store.rpush(body[0], body[1:])
             rv = serialize_data(resp)
             if resp is None:
-                rv = serialize_data(Error(
-                    f"Cannot perform RPUSH for key={body[0]}."
-                    f" Current value stored: {store.get(body[0])!r}"
-                ))
+                rv = serialize_data(
+                    Error(
+                        f"Cannot perform RPUSH for key={body[0]}."
+                        f" Current value stored: {store.get(body[0])!r}"
+                    )
+                )
             return CommandType.Rpush, rv
         case CommandType.Save.value:
             resp = store.save()
@@ -518,10 +514,10 @@ def get_response(data):
     print(f"{res=}")
     match res:
         case list() if len(res) > 0:
-            rv = handle_command(res[0], res[1:])
+            rv = handle_command(res[0], res[1:], store)
             return rv
         case _:
-            return None, f"-Err: Can't respond to unknown input {data=}\r\n"
+            return None, Error("Invalid data recieved from client. Expected list").ser()
 
 
 def handle_client(client: socket.socket):
@@ -534,6 +530,19 @@ def handle_client(client: socket.socket):
             break
 
     client.close()
+
+
+def serve(host: str, port: int):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    addr = (host, port)
+    sock.bind(addr)
+    sock.listen(5)
+    while True:
+        client, _ = sock.accept()
+        # TODO: get rid of threads
+        t = Thread(target=handle_client, args=(client,))
+        t.start()
 
 
 def main(argv: list[str] | None = None):
