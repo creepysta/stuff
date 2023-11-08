@@ -428,16 +428,6 @@ def serialize_data(data) -> str:
             return serialize_null()
 
 
-def read_data(client: socket.socket) -> str:
-    data = ""
-    while r := client.recv(1024):
-        data += r.decode("utf-8")
-        if len(r) < 1024 or not r:
-            break
-
-    return data
-
-
 def handle_command(command: str, body: list, store: Redis):
     match command.upper():
         case CommandType.Ping.value:
@@ -518,6 +508,16 @@ def get_response(data):
             return rv
         case _:
             return None, Error("Invalid data recieved from client. Expected list").ser()
+
+
+def read_data(client: socket.socket) -> str:
+    data = ""
+    while r := client.recv(1024):
+        data += r.decode("utf-8")
+        if len(r) < 1024 or not r:
+            break
+
+    return data
 
 
 def handle_client(client: socket.socket):
