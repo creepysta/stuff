@@ -14,8 +14,11 @@ class Redis:
         self.store[key] = val
         return "OK"
 
-    def get(self, key: str):
+    def _get(self, key: str):
         return self.store.get(key)
+
+    def get(self, key: str) -> str:
+        return str(self._get(key))
 
     def exists(self, keys: list) -> int:
         return sum([key in self.store.keys() for key in keys])
@@ -30,39 +33,100 @@ class Redis:
         return rv
 
     def incr(self, key: str) -> int | None:
-        if not (self.get(key) is None or isinstance(self.get(key), int)):
+        if self._get(key) is None:
+            self.set(key, "0")
+
+        if not (self.get(key).isnumeric() or self.get(key)[1:].isnumeric()):
             return None
 
-        self.set(key, (self.get(key) or 0) + 1)
-        return self.get(key)  # type: ignore
+        self.set(key, int(self.get(key) or 0) + 1)
+        return self._get(key)  # type: ignore
 
     def decr(self, key: str) -> int | None:
-        if not (self.get(key) is None or isinstance(self.get(key), int)):
+        if self._get(key) is None:
+            self.set(key, "0")
+
+        if not (self.get(key).isnumeric() or self.get(key)[1:].isnumeric()):
             return None
 
-        self.set(key, (self.get(key) or 0) - 1)
-        return self.get(key)  # type: ignore
+        self.set(key, int(self.get(key) or 0) - 1)
+        return self._get(key)  # type: ignore
 
     def lpush(self, key: str, vals: list) -> int | None:
-        if not (self.get(key) is None or isinstance(self.get(key), list)):
+        if not (self._get(key) is None or isinstance(self._get(key), list)):
             return None
 
         vals.reverse()
-        if self.get(key) is None:
+        if self._get(key) is None:
             self.set(key, [])
 
-        self.set(key, vals + self.get(key))  # type: ignore
-        return len(self.get(key))  # type: ignore
+        self.set(key, vals + self._get(key))  # type: ignore
+        return len(self._get(key))  # type: ignore
 
     def rpush(self, key: str, vals: list) -> int | None:
-        if not (self.get(key) is None or isinstance(self.get(key), list)):
+        if not (self._get(key) is None or isinstance(self._get(key), list)):
             return None
 
-        if self.get(key) is None:
+        if self._get(key) is None:
             self.set(key, [])
 
-        self.set(key, self.get(key) + vals)  # type: ignore
-        return len(self.get(key))  # type: ignore
+        self.set(key, self._get(key) + vals)  # type: ignore
+        return len(self._get(key))  # type: ignore
+
+    def llen(self, key: str) -> int | None:
+        if not (self._get(key) is None or isinstance(self._get(key), list)):
+            return None
+
+        if self._get(key) is None:
+            self.set(key, [])
+
+        return len(self._get(key))  # type: ignore
+
+    def lrange(self, key: str, low: int, high: int) -> list | None:
+        if not (self._get(key) is None or isinstance(self._get(key), list)):
+            return None
+
+        if self._get(key) is None:
+            self.set(key, [])
+
+        if high == -1:
+            return self._get(key)[low:]
+
+        return self._get(key)[low : high + 1]  # type: ignore
+
+    def hset(self, key: str, vals: list) -> int:
+        if self._get(key) is None:
+            self.set(key, {})
+
+        m: dict = self._get(key)  # type: ignore
+        for name, val in zip(vals[::2], vals[1::2]):
+            m[name] = val
+
+        return len(m)
+
+    def hget(self, key: str, mkey: str):
+        stored = self._get(key) or {}
+        return stored.get(mkey)
+
+    def hmget(self, key: str, mkeys: list):
+        stored = self._get(key) or {}
+        rv = [stored.get(k) for k in mkeys]
+        return rv
+
+    def hgetall(self, key: str) -> list:
+        stored = self._get(key) or {}
+        rv = []
+        for k, v in stored.items():
+            rv.append(k)
+            rv.append(v)
+
+        return rv
+
+    def hincrby(self, key: str, mkey: str, by: int) -> int:
+        stored = self._get(key) or {}
+        stored[mkey] = stored.get(mkey, 0) + by
+
+        return stored[mkey]
 
     def save(self) -> str:
         return "OK"
@@ -83,7 +147,16 @@ class CommandType(Enum):
     Decr = "DECR"
     Save = "SAVE"
     Lpush = "LPUSH"
+    Lpop = "LPOP"
     Rpush = "RPUSH"
+    Rpop = "RPOP"
+    Llen = "LLEN"
+    Lrange = "LRANGE"
+    Hset = "HSET"
+    Hget = "HGET"
+    Hmget = "HMGET"
+    Hgetall = "HGETALL"
+    Hincrby = "HINCRBY"
 
 
 class ErrorType(Enum):
@@ -490,6 +563,36 @@ def handle_command(command: str, body: list, store: Redis):
                     )
                 )
             return CommandType.Rpush, rv
+        case CommandType.Lpop.value:
+            raise NotImplementedError()
+        case CommandType.Rpop.value:
+            raise NotImplementedError()
+        case CommandType.Llen.value:
+            resp = store.llen(body[0])
+            rv = serialize_data(resp)
+            return CommandType.Llen, rv
+        case CommandType.Lrange.value:
+            resp = store.lrange(body[0], int(body[1]), int(body[2]))
+            rv = serialize_data(resp)
+            return CommandType.Lrange, rv
+        case CommandType.Hset.value:
+            resp = store.hset(body[0], body[1:])
+            rv = serialize_data(resp)
+            return CommandType.Hset, rv
+        case CommandType.Hget.value:
+            resp = store.hget(body[0], body[1])
+            rv = serialize_data(resp)
+            return CommandType.Hget, rv
+        case CommandType.Hmget.value:
+            resp = store.hmget(body[0], body[1:])
+            rv = serialize_data(resp)
+            return CommandType.Hmget, rv
+        case CommandType.Hgetall.value:
+            resp = store.hgetall(body[0])
+            rv = serialize_data(resp)
+            return CommandType.Hgetall, rv
+        case CommandType.Hincrby.value:
+            raise NotImplementedError()
         case CommandType.Save.value:
             resp = store.save()
             rv = serialize_data(resp)

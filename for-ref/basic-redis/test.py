@@ -190,7 +190,7 @@ def test_exists(store: Redis):
 def test_set(store: Redis):
     cmd_type, res = handle_command("SET", [BulkString(3, "Foo"), 1], store)
     rv = parse_data(parse_crlf(res))
-    assert store.get("Foo") == 1
+    assert store.get("Foo") == "1"
     assert cmd_type == CommandType.Set
     assert rv == "OK"
 
@@ -200,7 +200,7 @@ def test_get(store: Redis):
     cmd_type, res = handle_command("GET", [BulkString(3, "Foo")], store)
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Get
-    assert rv == 999
+    assert rv == "999"
 
 
 def test_incr_no_prev(store: Redis):
@@ -238,7 +238,7 @@ def test_lpush_no_prev(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Lpush
     assert rv == 3
-    assert store.get("Foo") == [3, 2, 1]
+    assert store._get("Foo") == [3, 2, 1]
 
 
 def test_lpush_with_prev(store: Redis):
@@ -247,7 +247,7 @@ def test_lpush_with_prev(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Lpush
     assert rv == 4
-    assert store.get("Foo") == [3, 2, 1, 999]
+    assert store._get("Foo") == [3, 2, 1, 999]
 
 
 def test_rpush_no_prev(store: Redis):
@@ -255,7 +255,7 @@ def test_rpush_no_prev(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Rpush
     assert rv == 3
-    assert store.get("Foo") == [1, 2, 3]
+    assert store._get("Foo") == [1, 2, 3]
 
 
 def test_rpush_with_prev(store: Redis):
@@ -264,7 +264,26 @@ def test_rpush_with_prev(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Rpush
     assert rv == 4
-    assert store.get("Foo") == [999, 1, 2, 3]
+    assert store._get("Foo") == [999, 1, 2, 3]
+
+
+def test_llen(store: Redis):
+    store.set("Foo", [999, 991])
+    cmd_type, res = handle_command("LLEN", ["Foo"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Llen
+    assert rv == 2
+
+
+@pytest.mark.parametrize("low,high", [(0, 0), (0, 1), (1, 3), (0, -1), (1, -1)])
+def test_lrange(store: Redis, low, high):
+    data = [1, 2, 3, 4, 5, 6]
+    store.set("Foo", data)
+    cmd_type, res = handle_command("LRANGE", ["Foo", low, high], store)
+    rv = parse_data(parse_crlf(res))
+    expected = data[low: high+1] if high >= 0 else data[low:]
+    assert cmd_type == CommandType.Lrange
+    assert rv == expected
 
 
 def test_save(store: Redis):
@@ -272,3 +291,52 @@ def test_save(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Save
     assert rv == "OK"
+
+
+def test_hset_no_prev(store: Redis):
+    cmd_type, res = handle_command(
+        "HSET",
+        [
+            "foo:bar:baz",
+            "Foo",
+            "Bar",
+            "Bar",
+            "Baz",
+        ],
+        store,
+    )
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Hset
+    assert rv == 2
+    assert store._get("foo:bar:baz") == {"Foo": "Bar", "Bar": "Baz"}
+
+
+def test_hset_with_prev(store: Redis):
+    store.hset("foo:bar:baz", ["foo", "bar", "baz", "boo"])
+    cmd_type, res = handle_command(
+        "HSET", ["foo:bar:baz", "foo", "bar", "hello", "world"], store
+    )
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Hset
+    assert rv == 3
+    assert store._get("foo:bar:baz") == {"foo": "bar", "hello": "world", "baz": "boo"}
+
+
+def test_hget(store: Redis):
+    store.hset("foo:bar:baz", ["foo", "bar", "baz", "boo"])
+    cmd_type, res = handle_command(
+        "HGET", ["foo:bar:baz", "foo"], store
+    )
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Hget
+    assert rv == "bar"
+
+
+def test_hmget(store: Redis):
+    store.hset("foo:bar:baz", ["foo", "bar", "baz", "boo", "hello", "world"])
+    cmd_type, res = handle_command(
+        "HMGET", ["foo:bar:baz", "foo", "bar", "hello", "world"], store
+    )
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Hmget
+    assert rv == ["bar", None, "world", None]
