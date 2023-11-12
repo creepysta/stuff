@@ -17,7 +17,10 @@ class Redis:
     def _get(self, key: str):
         return self.store.get(key)
 
-    def get(self, key: str) -> str:
+    def get(self, key: str) -> str | None:
+        if self._get(key) is None:
+            return None
+
         return str(self._get(key))
 
     def exists(self, keys: list) -> int:
@@ -157,6 +160,7 @@ class CommandType(Enum):
     Hmget = "HMGET"
     Hgetall = "HGETALL"
     Hincrby = "HINCRBY"
+    Client = "CLIENT"
 
 
 class ErrorType(Enum):
@@ -429,6 +433,8 @@ def serialize_bool(val: bool) -> str:
 
 
 def serialize_null() -> str:
+    return "$-1\r\n"
+    return "*-1\r\n"
     return "_\r\n"
 
 
@@ -597,20 +603,22 @@ def handle_command(command: str, body: list, store: Redis):
             resp = store.save()
             rv = serialize_data(resp)
             return CommandType.Save, rv
+        case CommandType.Client.value:
+            return CommandType.Client, serialize_data("Ok")
         case _:
-            return None, serialize_error(Error("Invalid command"))
+            return None, serialize_error(Error("Invalid command: {command=} | {body=}"))
 
 
 def get_response(data):
     tokens = parse_crlf(data)
     res = parse_data(tokens)
-    print(f"{res=}")
+    # print(f"{res=}")
     match res:
         case list() if len(res) > 0:
             rv = handle_command(res[0], res[1:], store)
             return rv
         case _:
-            return None, Error("Invalid data recieved from client. Expected list").ser()
+            return None, Error(f"Invalid data recieved from client. Expected list, got {data=}").ser()
 
 
 def read_data(client: socket.socket) -> str:
@@ -625,9 +633,9 @@ def read_data(client: socket.socket) -> str:
 
 def handle_client(client: socket.socket):
     while data := read_data(client):
-        print(f"{data=}")
+        # print(f"{data=}")
         ctype, res = get_response(data)
-        print(f"{res=}")
+        # print(f"{res=}")
         client.sendall(res.encode("utf-8"))
         if ctype is None:
             break
