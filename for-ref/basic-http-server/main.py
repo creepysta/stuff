@@ -10,6 +10,7 @@ HTTP_200 = "HTTP/1.1 200 OK"
 HTTP_201 = "HTTP/1.1 201 Created"
 HTTP_400 = "HTTP/1.1 400 Bad Request"
 HTTP_404 = "HTTP/1.1 404 Not Found"
+HTTP_302 = "HTTP/1.1 302 Found"
 
 
 class ServerOptions:
@@ -134,12 +135,17 @@ class Loop:
                 pass
 
 
-def text_response(text: str) -> str:
+def redirect_response(url: str) -> str:
+    return text_response("", headers=[f"location: {url}"], status=HTTP_302)
+
+
+def text_response(text: str, headers=[], status=HTTP_200) -> str:
     resp = "\r\n".join(
         [
-            HTTP_200,
+            status,
             "Content-Type: text/plain",
             f"Content-Length: {len(text)}",
+            *headers,
             "",
             text,
         ]
