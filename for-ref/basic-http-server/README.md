@@ -1,3 +1,7 @@
+# A very lite http server
+
+Sample use case - 
+```python
 import re
 from litehttp import HTTP_201, HTTP_400, Loop, Request, Server
 
@@ -21,3 +25,4 @@ handlers = [
 
 server = Server(loop=Loop(), handlers=handlers)
 server.run()
+```

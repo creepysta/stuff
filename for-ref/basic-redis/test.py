@@ -1,6 +1,5 @@
 import pytest
-
-from main import (
+from literedis import (
     BulkString,
     CommandType,
     Error,
@@ -143,7 +142,7 @@ def test_sets(data, expected: set):
 def test_ser_array():
     data = [1, 2, [BulkString(5, "hello"), BulkString(5, "world")], None, -3]
     got = serialize_data(data)
-    expected = "*5\r\n:1\r\n:2\r\n*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n_\r\n:-3\r\n"
+    expected = "*5\r\n:1\r\n:2\r\n*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n$-1\r\n:-3\r\n"
     assert got == expected
 
 
@@ -281,7 +280,7 @@ def test_lrange(store: Redis, low, high):
     store.set("Foo", data)
     cmd_type, res = handle_command("LRANGE", ["Foo", low, high], store)
     rv = parse_data(parse_crlf(res))
-    expected = data[low: high+1] if high >= 0 else data[low:]
+    expected = data[low : high + 1] if high >= 0 else data[low:]
     assert cmd_type == CommandType.Lrange
     assert rv == expected
 
@@ -324,9 +323,7 @@ def test_hset_with_prev(store: Redis):
 
 def test_hget(store: Redis):
     store.hset("foo:bar:baz", ["foo", "bar", "baz", "boo"])
-    cmd_type, res = handle_command(
-        "HGET", ["foo:bar:baz", "foo"], store
-    )
+    cmd_type, res = handle_command("HGET", ["foo:bar:baz", "foo"], store)
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Hget
     assert rv == "bar"

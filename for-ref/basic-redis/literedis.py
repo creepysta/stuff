@@ -162,6 +162,12 @@ class CommandType(Enum):
     Hincrby = "HINCRBY"
     Client = "CLIENT"
 
+    def __eq__(self, o):
+        if isinstance(o, str):
+            return self.value.lower() == o.lower()
+
+        return super().__eq__(o)
+
 
 class ErrorType(Enum):
     Command = "command"
@@ -509,23 +515,23 @@ def serialize_data(data) -> str:
 
 def handle_command(command: str, body: list, store: Redis):
     match command.upper():
-        case CommandType.Ping.value:
+        case CommandType.Ping:
             return CommandType.Ping, serialize_data("PONG")
-        case CommandType.Echo.value:
+        case CommandType.Echo:
             rv = serialize_data(body[0])
             return CommandType.Echo, rv
-        case CommandType.Exists.value:
+        case CommandType.Exists:
             resp = store.exists(body)
             rv = serialize_data(resp)
             return CommandType.Exists, rv
-        case CommandType.Set.value:
+        case CommandType.Set:
             resp = store.set(body[0], body[1])
             rv = serialize_data(resp)
             return CommandType.Set, rv
-        case CommandType.Get.value:
+        case CommandType.Get:
             rv = serialize_data(store.get(body[0]))
             return CommandType.Get, rv
-        case CommandType.Incr.value:
+        case CommandType.Incr:
             resp = store.incr(body[0])
             rv = serialize_data(resp)
             if resp is None:
@@ -536,7 +542,7 @@ def handle_command(command: str, body: list, store: Redis):
                     )
                 )
             return CommandType.Incr, rv
-        case CommandType.Decr.value:
+        case CommandType.Decr:
             resp = store.decr(body[0])
             rv = serialize_data(resp)
             if resp is None:
@@ -547,7 +553,7 @@ def handle_command(command: str, body: list, store: Redis):
                     )
                 )
             return CommandType.Decr, rv
-        case CommandType.Lpush.value:
+        case CommandType.Lpush:
             resp = store.lpush(body[0], body[1:])
             rv = serialize_data(resp)
             if resp is None:
@@ -558,7 +564,7 @@ def handle_command(command: str, body: list, store: Redis):
                     )
                 )
             return CommandType.Lpush, rv
-        case CommandType.Rpush.value:
+        case CommandType.Rpush:
             resp = store.rpush(body[0], body[1:])
             rv = serialize_data(resp)
             if resp is None:
@@ -569,41 +575,41 @@ def handle_command(command: str, body: list, store: Redis):
                     )
                 )
             return CommandType.Rpush, rv
-        case CommandType.Lpop.value:
+        case CommandType.Lpop:
             raise NotImplementedError()
-        case CommandType.Rpop.value:
+        case CommandType.Rpop:
             raise NotImplementedError()
-        case CommandType.Llen.value:
+        case CommandType.Llen:
             resp = store.llen(body[0])
             rv = serialize_data(resp)
             return CommandType.Llen, rv
-        case CommandType.Lrange.value:
+        case CommandType.Lrange:
             resp = store.lrange(body[0], int(body[1]), int(body[2]))
             rv = serialize_data(resp)
             return CommandType.Lrange, rv
-        case CommandType.Hset.value:
+        case CommandType.Hset:
             resp = store.hset(body[0], body[1:])
             rv = serialize_data(resp)
             return CommandType.Hset, rv
-        case CommandType.Hget.value:
+        case CommandType.Hget:
             resp = store.hget(body[0], body[1])
             rv = serialize_data(resp)
             return CommandType.Hget, rv
-        case CommandType.Hmget.value:
+        case CommandType.Hmget:
             resp = store.hmget(body[0], body[1:])
             rv = serialize_data(resp)
             return CommandType.Hmget, rv
-        case CommandType.Hgetall.value:
+        case CommandType.Hgetall:
             resp = store.hgetall(body[0])
             rv = serialize_data(resp)
             return CommandType.Hgetall, rv
-        case CommandType.Hincrby.value:
+        case CommandType.Hincrby:
             raise NotImplementedError()
-        case CommandType.Save.value:
+        case CommandType.Save:
             resp = store.save()
             rv = serialize_data(resp)
             return CommandType.Save, rv
-        case CommandType.Client.value:
+        case CommandType.Client:
             return CommandType.Client, serialize_data("Ok")
         case _:
             return None, serialize_error(Error("Invalid command: {command=} | {body=}"))
@@ -618,7 +624,12 @@ def get_response(data):
             rv = handle_command(res[0], res[1:], store)
             return rv
         case _:
-            return None, Error(f"Invalid data recieved from client. Expected list, got {data=}").ser()
+            return (
+                None,
+                Error(
+                    f"Invalid data recieved from client. Expected list, got {data=}"
+                ).ser(),
+            )
 
 
 def read_data(client: socket.socket) -> str:
