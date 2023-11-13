@@ -9,5 +9,5 @@ setup(
     py_modules=["literedis"],
     python_requires=">=3.10",
     install_requires=["wheel"],
-    # long_description=open('README.rst').read(),
+    entry_points={"console_scripts": ["literedis = literedis:main"]},
 )

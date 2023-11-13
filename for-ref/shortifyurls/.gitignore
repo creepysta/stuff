@@ -1,0 +1,7 @@
+.pytest_cache/
+__pycache__/
+build/
+dist/
+shortifyurls.egg-info/
+.venv/
+local_wheels/

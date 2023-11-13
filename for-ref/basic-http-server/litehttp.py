@@ -1,3 +1,4 @@
+import json
 import socket
 from argparse import ArgumentParser
 from collections import deque
@@ -8,6 +9,7 @@ from urllib.parse import parse_qsl, urlparse
 
 HTTP_200 = "HTTP/1.1 200 OK"
 HTTP_201 = "HTTP/1.1 201 Created"
+HTTP_204 = "HTTP/1.1 204 No Content"
 HTTP_400 = "HTTP/1.1 400 Bad Request"
 HTTP_404 = "HTTP/1.1 404 Not Found"
 HTTP_302 = "HTTP/1.1 302 Found"
@@ -80,6 +82,9 @@ class Request:
 
         return "\n".join(self._data[self._body_start :])
 
+    def json(self) -> dict:
+        return json.loads(self.body)
+
     def __repr__(self):
         args = ", ".join(
             [
@@ -136,10 +141,10 @@ class Loop:
 
 
 def redirect_response(url: str) -> str:
-    return text_response("", headers=[f"location: {url}"], status=HTTP_302)
+    return text_response(headers=[f"location: {url}"], status=HTTP_302)
 
 
-def text_response(text: str, headers=[], status=HTTP_200) -> str:
+def text_response(text: str = "", headers=[], status=HTTP_200) -> str:
     resp = "\r\n".join(
         [
             status,
@@ -160,16 +165,7 @@ def file_response(file_path: str) -> str | None:
         return None
 
     contents = file.read_text()
-    resp = "\r\n".join(
-        [
-            HTTP_200,
-            "Content-Type: application/octet-stream",
-            f"Content-Length: {len(contents)}",
-            "",
-            contents,
-            "",
-        ]
-    )
+    resp = text_response(text=contents)
     return resp
 
 
@@ -214,12 +210,12 @@ class Server:
         #         got = download_file(fname, req.body)
         #         resp = HTTP_201 + "\r\n\r\n"
 
-        print(f"{resp=}")
+        # print(f"{resp=}")
         return resp
 
     def handle_client(self, client: socket.socket):
         data = ""
-        print("Client connected:", client)
+        # print("Client connected:", client)
         while True:
             yield IoWaitType.Recv, client
             r = client.recv(1024)
@@ -228,7 +224,7 @@ class Server:
                 break
 
         request = Request(data)
-        print(f"{request=}")
+        # print(f"{request=}")
         resp = self.get_response(request)
         yield IoWaitType.Send, client
         client.sendall(resp.encode("utf-8"))
