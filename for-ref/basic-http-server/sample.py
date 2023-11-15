@@ -6,7 +6,7 @@ from litehttp import HTTP_201, HTTP_400, Loop, Request, Server
 def handle_root(req: Request):
     resp = HTTP_400
     if req.method == "POST":
-        print(f"POST: {req=}")
+        print(f"POST: {req.json()=}")
         resp = HTTP_201
 
     if req.method == "DELETE":

@@ -1,11 +1,24 @@
 import json
+import logging
 import socket
+import sys
 from argparse import ArgumentParser
 from collections import deque
 from enum import Enum
 from pathlib import Path
 from select import select
+from threading import Thread
 from urllib.parse import parse_qsl, urlparse
+
+logger = logging.getLogger("litehttp")
+logger.setLevel(logging.DEBUG)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 HTTP_200 = "HTTP/1.1 200 OK"
 HTTP_201 = "HTTP/1.1 201 Created"
@@ -191,42 +204,28 @@ class Server:
             if fn(req.path) is True:
                 return handler(req)
 
-        # print(f"{req=}")
-        # if req.path == "/":
-        #     resp = HTTP_200 + "\r\n\r\n"
-        # elif req.path.startswith("/echo"):
-        #     val = req.path.lstrip("/echo/")
-        #     resp = text_response(val)
-        # elif req.path == "/user-agent":
-        #     val = req.headers.get("User-Agent", "NA")
-        #     resp = text_response(val)
-        # elif req.path.startswith("/files"):
-        #     fname = req.path.lstrip("/files")
-        #     if req.method == "GET":
-        #         got = file_response(fname)
-        #         if got is not None:
-        #             resp = got
-        #     elif req.method == "POST":
-        #         got = download_file(fname, req.body)
-        #         resp = HTTP_201 + "\r\n\r\n"
-
-        # print(f"{resp=}")
         return resp
 
     def handle_client(self, client: socket.socket):
         data = ""
-        # print("Client connected:", client)
+        logger.info(f"Client connected: {client.getpeername()}")
+        client.settimeout(0.05)
         while True:
-            yield IoWaitType.Recv, client
-            r = client.recv(1024)
+            # yield IoWaitType.Recv, client
+            try:
+                r = client.recv(1024)
+            except TimeoutError:
+                break
+            logger.debug(f"Read chunk {len(r)=} | {r=}")
             data += r.decode("utf-8")
-            if not r or len(r) < 1024:
+            if not r:  # or len(r) < 1024:
                 break
 
+        logger.debug(f"{data=}")
         request = Request(data)
-        # print(f"{request=}")
+        logger.debug(f"{request=}")
         resp = self.get_response(request)
-        yield IoWaitType.Send, client
+        # yield IoWaitType.Send, client
         client.sendall(resp.encode("utf-8"))
         client.close()
 
@@ -236,14 +235,17 @@ class Server:
         sock.bind(address)
         sock.listen(5)
         while True:
-            yield IoWaitType.Recv, sock
+            # yield IoWaitType.Recv, sock
             client, _ = sock.accept()
-            self.loop.add_job(self.handle_client(client))
+            t = Thread(target=self.handle_client, args=(client,))
+            t.start()
+            # self.loop.add_job(self.handle_client(client))
 
     def run(self, host: str = "127.0.0.1", port: int = 42999):
-        print(f"Server listening at {host}:{port}...")
-        self.loop.add_job(self.serve((host, port)))
-        self.loop.start()
+        logger.info(f"Server listening at {host}:{port}...")
+        self.serve((host, port))
+        # self.loop.add_job(self.serve((host, port)))
+        # self.loop.start()
 
 
 def setup_defaults(host: str, port: int):
