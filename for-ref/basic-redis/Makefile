@@ -1,5 +1,5 @@
 clean:
-	@rm -rf build *.egg* dist
+	@rm -rf build *.egg* dist __pycache__ .pytest_cache/
 
 build: clean
 	@python3 -m build --wheel

@@ -1,4 +1,5 @@
 import pytest
+
 from literedis import (
     BulkString,
     CommandType,

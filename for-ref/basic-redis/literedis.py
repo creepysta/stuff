@@ -1,9 +1,20 @@
 # Uncomment this to pass the first stage
+import logging
 import socket
+import sys
 from argparse import ArgumentParser
 from enum import Enum
 from threading import Thread
 from typing import Generator
+
+logger = logging.getLogger("literedis")
+logger.setLevel(logging.DEBUG)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 
 class Redis:
@@ -618,7 +629,7 @@ def handle_command(command: str, body: list, store: Redis):
 def get_response(data):
     tokens = parse_crlf(data)
     res = parse_data(tokens)
-    # print(f"{res=}")
+    logger.debug(f"{res=}")
     match res:
         case list() if len(res) > 0:
             rv = handle_command(res[0], res[1:], store)
@@ -643,10 +654,11 @@ def read_data(client: socket.socket) -> str:
 
 
 def handle_client(client: socket.socket):
+    logger.info(f"Client connected: {client.getpeername()}")
     while data := read_data(client):
-        # print(f"{data=}")
+        logger.debug(f"Got data: {data=}")
         ctype, res = get_response(data)
-        # print(f"{res=}")
+        logger.debug(f"Response: {res=}")
         client.sendall(res.encode("utf-8"))
         if ctype is None:
             break
@@ -675,7 +687,7 @@ def main(argv: list[str] | None = None):
     if args.serve:
         host = "localhost"
         port = 6379
-        print(f"Server listening on {host=}, {port=}")
+        logger.info(f"Server listening on {host=}, {port=}")
         serve(host, port)
 
 
