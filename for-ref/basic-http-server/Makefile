@@ -1,7 +1,7 @@
 clean:
-	@rm -rf build *.egg* dist __pycache__ 
+	@rm -rf build *.egg* dist __pycache__
 
-build: clean lint 
+build: clean lint
 	@python3 -m build --wheel
 
 lint:

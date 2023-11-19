@@ -1,0 +1,7 @@
+./lib/litehttp-0.0.1-py3-none-any.whl
+youtube-dl
+pytest
+black
+isort
+build
+beautifulsoup4
