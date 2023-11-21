@@ -74,15 +74,15 @@ am__installdirs = "$(DESTDIR)$(man1dir)"
 NROFF = nroff
 MANS = $(man_MANS)
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
-ACLOCAL = ${SHELL} /home/dormando/p/danga/git/memcached/missing --run aclocal-1.11
-AMTAR = ${SHELL} /home/dormando/p/danga/git/memcached/missing --run tar
-AUTOCONF = ${SHELL} /home/dormando/p/danga/git/memcached/missing --run autoconf
-AUTOHEADER = ${SHELL} /home/dormando/p/danga/git/memcached/missing --run autoheader
-AUTOMAKE = ${SHELL} /home/dormando/p/danga/git/memcached/missing --run automake-1.11
-AWK = gawk
-CC = gcc -std=gnu99
+ACLOCAL = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/missing --run aclocal-1.11
+AMTAR = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/missing --run tar
+AUTOCONF = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/missing --run autoconf
+AUTOHEADER = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/missing --run autoheader
+AUTOMAKE = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/missing --run automake-1.11
+AWK = mawk
+CC = gcc
 CCDEPMODE = depmode=gcc3
-CFLAGS = -g -O2 -pthread -pthread -Wall -Werror -pedantic -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -fno-strict-aliasing
+CFLAGS = -g -O2 -pthread -pthread -Wall -Werror -pedantic -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls
 CPP = gcc -E
 CPPFLAGS = 
 CYGPATH_W = echo
@@ -97,16 +97,16 @@ EGREP = /bin/grep -E
 ENABLE_SASL = 
 EXEEXT = 
 GREP = /bin/grep
-INSTALL = /usr/bin/install -c
+INSTALL = /bin/install -c
 INSTALL_DATA = ${INSTALL} -m 644
 INSTALL_PROGRAM = ${INSTALL}
 INSTALL_SCRIPT = ${INSTALL}
 INSTALL_STRIP_PROGRAM = $(install_sh) -c -s
 LDFLAGS = 
 LIBOBJS = 
-LIBS = -levent -lrt 
+LIBS = -levent 
 LTLIBOBJS = 
-MAKEINFO = ${SHELL} /home/dormando/p/danga/git/memcached/missing --run makeinfo
+MAKEINFO = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/missing --run makeinfo
 MKDIR_P = /bin/mkdir -p
 OBJEXT = o
 PACKAGE = memcached
@@ -117,7 +117,7 @@ PACKAGE_TARNAME = memcached
 PACKAGE_URL = 
 PACKAGE_VERSION = 1.4.15
 PATH_SEPARATOR = :
-PROFILER = /usr/bin/gcov
+PROFILER = /bin/gcov
 PROFILER_FLAGS = -fprofile-arcs -ftest-coverage
 PROFILER_LDFLAGS = -lgcov
 SET_MAKE = 
@@ -125,11 +125,11 @@ SHELL = /bin/bash
 STRIP = 
 VERSION = 1.4.15
 XML2RFC = no
-XSLTPROC = /usr/bin/xsltproc
-abs_builddir = /home/dormando/p/danga/git/memcached/doc
-abs_srcdir = /home/dormando/p/danga/git/memcached/doc
-abs_top_builddir = /home/dormando/p/danga/git/memcached
-abs_top_srcdir = /home/dormando/p/danga/git/memcached
+XSLTPROC = no
+abs_builddir = /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/doc
+abs_srcdir = /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/doc
+abs_top_builddir = /home/sam/work/stuff/best-engineering-question/memcached-1.4.15
+abs_top_srcdir = /home/sam/work/stuff/best-engineering-question/memcached-1.4.15
 ac_ct_CC = gcc
 am__include = include
 am__leading_dot = .
@@ -156,7 +156,7 @@ host_vendor = unknown
 htmldir = ${docdir}
 includedir = ${prefix}/include
 infodir = ${datarootdir}/info
-install_sh = ${SHELL} /home/dormando/p/danga/git/memcached/install-sh
+install_sh = ${SHELL} /home/sam/work/stuff/best-engineering-question/memcached-1.4.15/install-sh
 libdir = ${exec_prefix}/lib
 libexecdir = ${exec_prefix}/libexec
 localedir = ${datarootdir}/locale
@@ -428,10 +428,10 @@ uninstall-man: uninstall-man1
 	no $< $@
 
 %.chk: %.xml xml2rfc/rfc2629-refchk.xsl
-	/usr/bin/xsltproc xml2rfc/rfc2629-refchk.xsl $< >$@
+	no xml2rfc/rfc2629-refchk.xsl $< >$@
 
 %.full: %.xml xml2rfc/rfc2629-noinc.xsl
-	/usr/bin/xsltproc xml2rfc/rfc2629-noinc.xsl $< >$@
+	no xml2rfc/rfc2629-noinc.xsl $< >$@
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
