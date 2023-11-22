@@ -338,3 +338,56 @@ def test_hmget(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Hmget
     assert rv == ["bar", None, "world", None]
+
+
+def test_sadd(store: Redis):
+    store.sadd("foo:bar:baz", ["foo:1", "bar"])
+    cmd_type, res = handle_command("SADD", ["foo:bar:baz", "foo:2", "bar"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Sadd
+    assert rv == 1, 'could only set "foo:2" since "bar" was already present'
+
+
+def test_srem(store: Redis):
+    store.sadd("foo:bar:baz", ["foo:1", "bar"])
+    cmd_type, res = handle_command("SREM", ["foo:bar:baz", "foo:2", "bar"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Srem
+    assert rv == 1, 'could only remove "bar" since "foo:2" was not in the set'
+
+
+def test_sinter(store: Redis):
+    store.sadd("foo:bar", ["foo:1", "bar"])
+    store.sadd("bar:baz", ["foo:2", "bar"])
+    cmd_type, res = handle_command("SINTER", ["foo:bar", "bar:baz"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Sinter
+    assert rv == ["bar"], '"bar" is only common'
+
+
+def test_sismember(store: Redis):
+    store.sadd("foo:bar", ["foo:1", "bar"])
+    cmd_type, res = handle_command("SISMEMBER", ["foo:bar", "foo:1"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Sismember
+    assert rv == True, '"foo:1" is only common'
+    cmd_type, res = handle_command("SISMEMBER", ["foo:bar", "foo:2"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Sismember
+    assert rv == False, '"foo:2" should not present'
+
+
+def test_scard(store: Redis):
+    store.sadd("foo:bar", ["foo:1", "bar"])
+    cmd_type, res = handle_command("SCARD", ["foo:bar"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Scard
+    assert rv == 2, '"foo:1", "bar" are the elements'
+
+
+def test_smembers(store: Redis):
+    store.sadd("foo:bar", ["foo:1", "bar"])
+    cmd_type, res = handle_command("SMEMBERS", ["foo:bar"], store)
+    rv = parse_data(parse_crlf(res))
+    assert cmd_type == CommandType.Smembers
+    assert set(rv) == set(["foo:1", "bar"]), '"foo:1", "bar" are the elements'

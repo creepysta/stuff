@@ -5,7 +5,7 @@ import sys
 from argparse import ArgumentParser
 from enum import Enum
 from threading import Thread
-from typing import Generator
+from typing import Any, Generator
 
 logger = logging.getLogger("literedis")
 logger.setLevel(logging.DEBUG)
@@ -67,50 +67,54 @@ class Redis:
         return self._get(key)  # type: ignore
 
     def lpush(self, key: str, vals: list) -> int | None:
-        if not (self._get(key) is None or isinstance(self._get(key), list)):
+        if self._get(key) is None:
+            self.set(key, [])
+
+        if not isinstance(self._get(key), list):
             return None
 
         vals.reverse()
-        if self._get(key) is None:
-            self.set(key, [])
 
         self.set(key, vals + self._get(key))  # type: ignore
         return len(self._get(key))  # type: ignore
 
     def rpush(self, key: str, vals: list) -> int | None:
-        if not (self._get(key) is None or isinstance(self._get(key), list)):
-            return None
-
         if self._get(key) is None:
             self.set(key, [])
+
+        if not isinstance(self._get(key), list):
+            return None
 
         self.set(key, self._get(key) + vals)  # type: ignore
         return len(self._get(key))  # type: ignore
 
     def llen(self, key: str) -> int | None:
-        if not (self._get(key) is None or isinstance(self._get(key), list)):
-            return None
-
         if self._get(key) is None:
             self.set(key, [])
+
+        if not isinstance(self._get(key), list):
+            return None
 
         return len(self._get(key))  # type: ignore
 
     def lrange(self, key: str, low: int, high: int) -> list | None:
-        if not (self._get(key) is None or isinstance(self._get(key), list)):
-            return None
-
         if self._get(key) is None:
             self.set(key, [])
+
+        if not isinstance(self._get(key), list):
+            return None
 
         if high == -1:
             return self._get(key)[low:]
 
         return self._get(key)[low : high + 1]  # type: ignore
 
-    def hset(self, key: str, vals: list) -> int:
+    def hset(self, key: str, vals: list) -> int | None:
         if self._get(key) is None:
             self.set(key, {})
+
+        if not isinstance(self._get(key), dict):
+            return None
 
         m: dict = self._get(key)  # type: ignore
         for name, val in zip(vals[::2], vals[1::2]):
@@ -142,6 +146,91 @@ class Redis:
 
         return stored[mkey]
 
+    def sadd(self, key: str, vals: list) -> int | None:
+        if self._get(key) is None:
+            self.set(key, set())
+
+        if not isinstance(self._get(key), set):
+            return None
+
+        s: set = self._get(key)  # type: ignore
+        n = 0
+        for val in vals:
+            n += int(val not in s)
+            s.add(val)
+
+        return n
+
+    def srem(self, key: str, vals: list) -> int | None:
+        if self._get(key) is None:
+            self.set(key, set())
+
+        if not isinstance(self._get(key), set):
+            return None
+
+        s: set = self._get(key)  # type: ignore
+        print("Set:", s)
+        n = 0
+        for val in vals:
+            if val not in s:
+                continue
+
+            n += 1
+            s.remove(val)
+
+        return n
+
+    def sismember(self, key: str, val: str) -> int | None:
+        if self._get(key) is None:
+            self.set(key, set())
+
+        if not isinstance(self._get(key), set):
+            return None
+
+        s: set = self._get(key)  # type: ignore
+        return int(val in s)
+
+    def sinter(self, s1: str, sets: list[str]) -> list | None:
+        if self._get(s1) is None:
+            self.set(s1, set())
+
+        if not isinstance(self._get(s1), set):
+            return None
+
+        set1: set = self._get(s1)  # type: ignore
+        rv = set1
+        for s in sets:
+            item = self._get(s)
+            if item is None:
+                self.set(s, set())
+            if not isinstance(item, set):
+                return None
+
+            st: set = self._get(s)  # type: ignore
+            rv = rv.intersection(st)
+
+        return list(rv)
+
+    def scard(self, key: str) -> int | None:
+        if self._get(key) is None:
+            self.set(key, set())
+
+        if not isinstance(self._get(key), set):
+            return None
+
+        s: set = self._get(key)  # type: ignore
+        return len(s)
+
+    def smembers(self, key: str) -> list | None:
+        if self._get(key) is None:
+            self.set(key, set())
+
+        if not isinstance(self._get(key), set):
+            return None
+
+        s: set = self._get(key)  # type: ignore
+        return list(s)
+
     def save(self) -> str:
         return "OK"
 
@@ -171,6 +260,12 @@ class CommandType(Enum):
     Hmget = "HMGET"
     Hgetall = "HGETALL"
     Hincrby = "HINCRBY"
+    Sadd = "SADD"
+    Srem = "Srem"
+    Sismember = "SISMEMBER"
+    Sinter = "SINTER"
+    Scard = "SCARD"
+    Smembers = "SMEMBERS"
     Client = "CLIENT"
 
     def __eq__(self, o):
@@ -524,7 +619,7 @@ def serialize_data(data) -> str:
             return serialize_null()
 
 
-def handle_command(command: str, body: list, store: Redis):
+def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType, Any]:
     match command.upper():
         case CommandType.Ping:
             return CommandType.Ping, serialize_data("PONG")
@@ -616,6 +711,30 @@ def handle_command(command: str, body: list, store: Redis):
             return CommandType.Hgetall, rv
         case CommandType.Hincrby:
             raise NotImplementedError()
+        case CommandType.Sadd:
+            resp = store.sadd(body[0], body[1:])
+            rv = serialize_data(resp)
+            return CommandType.Sadd, rv
+        case CommandType.Srem:
+            resp = store.srem(body[0], body[1:])
+            rv = serialize_data(resp)
+            return CommandType.Srem, rv
+        case CommandType.Sismember:
+            resp = store.sismember(body[0], body[1])
+            rv = serialize_data(resp)
+            return CommandType.Sismember, rv
+        case CommandType.Sinter:
+            resp = store.sinter(body[0], body[1:])
+            rv = serialize_data(resp)
+            return CommandType.Sinter, rv
+        case CommandType.Scard:
+            resp = store.scard(body[0])
+            rv = serialize_data(resp)
+            return CommandType.Scard, rv
+        case CommandType.Smembers:
+            resp = store.smembers(body[0])
+            rv = serialize_data(resp)
+            return CommandType.Smembers, rv
         case CommandType.Save:
             resp = store.save()
             rv = serialize_data(resp)

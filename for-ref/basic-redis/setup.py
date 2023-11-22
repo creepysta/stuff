@@ -8,6 +8,5 @@ setup(
     author_email="travisparker.thechoice93@gmail.com",
     py_modules=["literedis"],
     python_requires=">=3.10",
-    install_requires=["wheel"],
     entry_points={"console_scripts": ["literedis = literedis:main"]},
 )

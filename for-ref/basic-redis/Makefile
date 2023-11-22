@@ -1,3 +1,6 @@
+init:
+	@pip3 install -r requirements.dev.text
+
 clean:
 	@rm -rf build *.egg* dist __pycache__ .pytest_cache/
 
