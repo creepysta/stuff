@@ -1,5 +1,6 @@
 import json
 import re
+from uuid import uuid4
 
 from litehttp import (
     HTTP_200,
@@ -13,14 +14,17 @@ from litehttp import (
 )
 
 from .logger import logger
-from .utils import download_from_urls, fetch_url_from_name
+from .utils import download_from_urls, fetch_url_from_name, submit_helper, get_uid
+from redis import Redis
+from functools import partial
+from concurrent.futures import ProcessPoolExecutor
 
 
 def handle_root(_: Request):
     return text_response(text="Howdy!")
 
 
-def search_get(req: Request):
+def search_get(req: Request, store: Redis):
     logger.debug(f"Processing get {req=} ...")
     try:
         name = req.query["name"]
@@ -28,12 +32,16 @@ def search_get(req: Request):
         logger.exception(f"Invalid query parameters in {req=}. Failed with error: {e}")
         return text_response(status=HTTP_400)
 
+    uid = get_uid()
     logger.debug(f"Got query {name=} ...")
-    url = fetch_url_from_name(name)
-    return text_response(text=url, status=HTTP_200)
+    with ProcessPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fetch_url_from_name, name=name)
+        future.add_done_callback(lambda x: store.set(uid, x.result()))
+
+    return text_response(text=uid, status=HTTP_200)
 
 
-def search_post(req: Request):
+def search_post(req: Request, store: Redis):
     logger.debug(f"Processing post {req=} ...")
     names: list
     try:
@@ -49,12 +57,12 @@ def search_post(req: Request):
     return text_response(text=resp, status=HTTP_200)
 
 
-def handle_search(req: Request):
+def handle_search(req: Request, store: Redis):
     match req.method:
         case "GET":
-            return search_get(req)
+            return search_get(req, store)
         case "POST":
-            return search_post(req)
+            return search_post(req, store)
         case _:
             return text_response(
                 "GET, POST are the only methods defined", status=HTTP_404
@@ -65,7 +73,7 @@ def search_path_match(path: str) -> bool:
     return re.search(r"/search$", path) is not None
 
 
-def download_post(req: Request):
+def download_post(req: Request, store: Redis):
     url: str
     try:
         url = req.json()["url"]
@@ -77,13 +85,18 @@ def download_post(req: Request):
     # 1) return the path for a tempdir and trigger a separate job to download the file
     # 2) make an endpoint where a client can poll if the job is finished
     # 3) use redis? check path once the client accesses it, remove dir
+    uid = get_uid()
     path = download_from_urls([url])
+    store.set(uid, path)
+    # with ProcessPoolExecutor(max_workers=1) as pool:
+    #     future = pool.submit(download_from_urls, urls=[url])
+    #     future.add_done_callback(lambda x: store.set(uid, x.result()))
 
 
-def handle_download(req: Request):
+def handle_download(req: Request, store: Redis):
     match req.method:
         case "POST":
-            return download_post(req)
+            return download_post(req, store)
         case _:
             return text_response("POST is the only method defined", status=HTTP_404)
 
@@ -92,12 +105,42 @@ def download_path_match(path: str) -> bool:
     return re.search(r"/download$", path) is not None
 
 
+def handle_result(req: Request, store: Redis):
+    def get():
+        logger.debug(f"Processing result get {req=} ...")
+        try:
+            uid = req.query["uid"]
+        except Exception as e:
+            logger.exception(f"Invalid query parameters in {req=}. Failed with error: {e}")
+            return text_response(status=HTTP_400)
+
+        logger.debug(f"Got query {uid=} ...")
+        res = store.get(uid)
+        if not res:
+            return text_response("The result is either not yet available or has already been consumed", status=HTTP_404)
+
+        store.set(uid, "")
+        return text_response(text=str(res), status=HTTP_200)
+
+    match req.method:
+        case "GET":
+            return get()
+        case _:
+            return text_response("POST is the only method defined", status=HTTP_404)
+
+
+def result_path_match(path: str) -> bool:
+    return re.search(r"/result$", path) is not None
+
+
 def run(args):
     host, port = args.host, args.port
+    store = Redis(host=args.redis_host, port=6379)
     handlers = [
         (lambda x: x == "/", handle_root),
-        (search_path_match, handle_search),
-        (download_path_match, handle_download),
+        (search_path_match, partial(handle_search, store=store)),
+        (download_path_match, partial(handle_download, store=store)),
+        (result_path_match, partial(handle_result, store=store)),
     ]
 
     logger.info(f"Trying to start server with {host}:{port}...")

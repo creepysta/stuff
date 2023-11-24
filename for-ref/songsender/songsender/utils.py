@@ -8,12 +8,19 @@ import time
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
+from uuid import uuid4
 
 import requests
 import youtube_dl
 from bs4 import BeautifulSoup
 
 from .logger import logger
+from redis import Redis
+from logging import Logger
+
+
+def get_uid(n=5):
+    return uuid4().hex[:n]
 
 
 def retry_with_exception(exception=Exception, retry_cnt: int = 1):
@@ -35,6 +42,10 @@ def retry_with_exception(exception=Exception, retry_cnt: int = 1):
     return wrapper
 
 
+def submit_helper(fn, *, uid: str, store: Redis, logger: Logger, **kwargs):
+    logger.info(f"[submit_helper] {fn=}, {uid=}, {store=}, {kwargs=}")
+    store.set(uid, fn(**kwargs))
+
 def ytdl_hook(d):
     if d["status"] == "finished":
         logger.info(f"Done downloading, now converting {d=}...")
@@ -43,18 +54,21 @@ def ytdl_hook(d):
 @contextmanager
 def prepare_temp_dir():
     prev_path = Path()
-    download_dir = tempfile.tempdir or f"/tmp/{time.now()}"
+    download_dir = tempfile.tempdir or f"/tmp/{time.time()}"
     path = Path(download_dir)
     path.mkdir(parents=True)
+    logger.info(f"[prepare_temp_dir] Created {download_dir=}")
     os.chdir(path)
+    logger.info(f"[prepare_temp_dir] Switching to {download_dir=} from {prev_path=} ...")
     try:
         yield download_dir
     finally:
-        shutil.rmtree(download_dir)
+        # shutil.rmtree(download_dir)
+        logger.info(f"[prepare_temp_dir] Switching back to {prev_path=}...")
         os.chdir(prev_path)
 
 
-@retry_with_exception(Exception, retry_cnt=3)
+# @retry_with_exception(Exception, retry_cnt=3)
 def download_from_urls(urls: list):
     ydl_opts = {
         "format": "bestaudio/best",
@@ -69,11 +83,14 @@ def download_from_urls(urls: list):
         "progress_hooks": [ytdl_hook],
     }
 
+    path: str
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        with prepare_temp_dir() as path:
+        with prepare_temp_dir() as _p:
             # ydl.download(["https://www.youtube.com/watch?v=BaW_jenozKc"])
-            ydl.download([urls])
-            return path
+            ydl.download(urls)
+            path = _p
+
+    return path
 
 
 def progress(chunk=None, bytes_done=None, total_bytes=None):
