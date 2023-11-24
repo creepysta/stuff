@@ -346,6 +346,7 @@ def test_sadd(store: Redis):
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Sadd
     assert rv == 1, 'could only set "foo:2" since "bar" was already present'
+    assert set(store.smembers("foo:bar:baz")) == {"foo:1", "foo:2", "bar"}
 
 
 def test_srem(store: Redis):
@@ -362,7 +363,7 @@ def test_sinter(store: Redis):
     cmd_type, res = handle_command("SINTER", ["foo:bar", "bar:baz"], store)
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Sinter
-    assert rv == ["bar"], '"bar" is only common'
+    assert set(rv) == {"bar", }, '"bar" is only common'
 
 
 def test_sismember(store: Redis):
@@ -390,4 +391,4 @@ def test_smembers(store: Redis):
     cmd_type, res = handle_command("SMEMBERS", ["foo:bar"], store)
     rv = parse_data(parse_crlf(res))
     assert cmd_type == CommandType.Smembers
-    assert set(rv) == set(["foo:1", "bar"]), '"foo:1", "bar" are the elements'
+    assert set(rv) == {"foo:1", "bar"}, '"foo:1", "bar" are the elements'

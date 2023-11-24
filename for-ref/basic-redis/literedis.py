@@ -17,6 +17,97 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
+class ErrorType(Enum):
+    Command = "command"
+    InvalidData = "invalid_data"
+    WrongType = "wrong_type_operation"
+
+
+class Base:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+        super().__init__()
+
+    @property
+    def _margs(self):
+        args = ",".join(
+            [
+                f"{k}={v!r}"
+                for k, v in vars(self).items()  # self.kwargs.items()
+                if not (k.startswith("_"))
+            ]
+        )
+        return args
+
+    def __repr__(self):
+        cons = f"{type(self).__name__}({self._margs})"
+        return cons
+
+    def __eq__(self, o):
+        if not isinstance(o, type(self)):
+            raise NotImplementedError()
+
+        ok = True
+        for k, v in vars(self).items():
+            if not hasattr(self, k):
+                continue
+
+            ok = ok and (getattr(o, k) == v)
+
+        return ok
+
+    def __hash__(self):
+        args = self._margs
+        return hash(args)
+
+
+class Error(Base):
+    def __init__(self, msg: str, **kwargs):
+        self.msg = msg
+        super().__init__(msg=msg, **kwargs)
+
+    def ser(self):
+        return f"-Err: {self.msg}\r\n"
+
+    def __str__(self):
+        return self.msg
+
+
+class BulkError(Error):
+    def __init__(self, sz: int, msg: str, **kwargs):
+        self.sz = sz
+        self.msg = msg
+        super().__init__(msg=msg, **kwargs)
+
+    def ser(self):
+        return f"!{self.sz}\r\n-Err: {self.msg}\r\n"
+
+    def __str__(self):
+        return self.msg
+
+
+class BulkString(str):
+    def __new__(cls, sz: int, data: str):
+        # ref - https://stackoverflow.com/questions/7255655/how-to-subclass-str-in-python
+        cls.sz = sz
+        return super().__new__(cls, data)
+
+    def __init__(self, sz: int, data: str):
+        self.sz = sz
+        self.data = data
+
+    def __str__(self):
+        return self.data
+
+    def ser(self):
+        return f"${self.sz}\r\n{self.data}\r\n"
+
+    def __repr__(self):
+        return f"{type(self).__name__}(sz={self.sz},data={self.data})"
+
+
 class Redis:
     def __init__(self):
         self.store = {}
@@ -28,11 +119,12 @@ class Redis:
     def _get(self, key: str):
         return self.store.get(key)
 
-    def get(self, key: str) -> str | None:
+    def get(self, key: str) -> BulkString | None:
         if self._get(key) is None:
             return None
 
-        return str(self._get(key))
+        item = str(self._get(key))
+        return BulkString(len(item), item)
 
     def exists(self, keys: list) -> int:
         return sum([key in self.store.keys() for key in keys])
@@ -67,25 +159,29 @@ class Redis:
         return self._get(key)  # type: ignore
 
     def lpush(self, key: str, vals: list) -> int | None:
-        if self._get(key) is None:
+        item = self._get(key)  # type: ignore
+        if item is None:
             self.set(key, [])
 
         if not isinstance(self._get(key), list):
             return None
 
-        vals.reverse()
+        item: list = self._get(key)  # type: ignore
+        for val in vals:
+            item.insert(0, val)
 
-        self.set(key, vals + self._get(key))  # type: ignore
         return len(self._get(key))  # type: ignore
 
     def rpush(self, key: str, vals: list) -> int | None:
-        if self._get(key) is None:
+        item = self._get(key)  # type: ignore
+        if item is None:
             self.set(key, [])
 
         if not isinstance(self._get(key), list):
             return None
 
-        self.set(key, self._get(key) + vals)  # type: ignore
+        item: list = self._get(key)  # type: ignore
+        item.extend(vals)
         return len(self._get(key))  # type: ignore
 
     def llen(self, key: str) -> int | None:
@@ -273,97 +369,6 @@ class CommandType(Enum):
             return self.value.lower() == o.lower()
 
         return super().__eq__(o)
-
-
-class ErrorType(Enum):
-    Command = "command"
-    InvalidData = "invalid_data"
-    WrongType = "wrong_type_operation"
-
-
-class Base:
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-        super().__init__()
-
-    @property
-    def _margs(self):
-        args = ",".join(
-            [
-                f"{k}={v!r}"
-                for k, v in vars(self).items()  # self.kwargs.items()
-                if not (k.startswith("_"))
-            ]
-        )
-        return args
-
-    def __repr__(self):
-        cons = f"{type(self).__name__}({self._margs})"
-        return cons
-
-    def __eq__(self, o):
-        if not isinstance(o, type(self)):
-            raise NotImplementedError()
-
-        ok = True
-        for k, v in vars(self).items():
-            if not hasattr(self, k):
-                continue
-
-            ok = ok and (getattr(o, k) == v)
-
-        return ok
-
-    def __hash__(self):
-        args = self._margs
-        return hash(args)
-
-
-class Error(Base):
-    def __init__(self, msg: str, **kwargs):
-        self.msg = msg
-        super().__init__(msg=msg, **kwargs)
-
-    def ser(self):
-        return f"-Err: {self.msg}\r\n"
-
-    def __str__(self):
-        return self.msg
-
-
-class BulkError(Error):
-    def __init__(self, sz: int, msg: str, **kwargs):
-        self.sz = sz
-        self.msg = msg
-        super().__init__(msg=msg, **kwargs)
-
-    def ser(self):
-        return f"!{self.sz}\r\n-Err: {self.msg}\r\n"
-
-    def __str__(self):
-        return self.msg
-
-
-class BulkString(str):
-    def __new__(cls, sz: int, data: str):
-        # ref - https://stackoverflow.com/questions/7255655/how-to-subclass-str-in-python
-        cls.sz = sz
-        return super().__new__(cls, data)
-
-    def __init__(self, sz: int, data: str):
-        self.sz = sz
-        self.data = data
-
-    def __str__(self):
-        return self.data
-
-    def ser(self):
-        return f"${self.sz}\r\n{self.data}\r\n"
-
-    def __repr__(self):
-        return f"{type(self).__name__}(sz={self.sz},data={self.data})"
 
 
 def handle_err(cmd: str | None, args: list[str] | None, error_type: ErrorType) -> str:
