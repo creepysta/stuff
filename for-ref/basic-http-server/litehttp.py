@@ -42,7 +42,7 @@ class Request:
     def __init__(self, data: str):
         self._data = data.split("\r\n")
         self._body_start = -1
-        assert len(self._data) > 2, "invalid request"
+        assert len(self._data) >= 2, "invalid request"
 
     @property
     def request(self) -> list[str]:
@@ -89,6 +89,7 @@ class Request:
 
     @property
     def body(self) -> str:
+        # TODO: body may contain binary data
         _ = self.headers  # prime the body pos just in case
         if self._body_start == -1 or self._body_start > len(self._data):
             return ""
@@ -154,42 +155,82 @@ class Loop:
 
 
 def redirect_response(url: str) -> str:
-    return text_response(headers=[f"location: {url}"], status=HTTP_302)
+    return text_response(headers={"location": url}, status=HTTP_302)
 
 
-def text_response(text: str = "", headers=[], status=HTTP_200) -> str:
-    resp = "\r\n".join(
-        [
-            status,
-            "Content-Type: text/plain",
-            f"Content-Length: {len(text)}",
-            *headers,
-            "",
-            text,
-        ]
-    )
+def resp_str(status, headers: dict, data=None):
+    hs = [f"{k}: {v}" for k, v in headers.items()]
+    payload = [status, *hs, ""]
+    if data:
+        payload.append(data)
+
+    resp = "\r\n".join(payload)
     return resp
 
 
-def file_response(file_path: str) -> str | None:
+def bin_response(data: bytes, headers: dict = {}, status=HTTP_200) -> bytes:
+    default_headers = {
+        "content-type": "application/octet-stream",
+        "content-length": len(data),
+    }
+    for k, v in headers.items():
+        default_headers[k.lower()] = v
+
+    resp = resp_str(status, default_headers).encode("utf-8")
+    newline = "\r\n".encode("utf-8")
+    return resp + newline + data + newline
+
+
+def json_response(data: dict, headers: dict = {}, status=HTTP_200) -> str:
+    return text_response(
+        json.dumps(data),
+        headers={"content-type": "application/json", **headers},
+        status=status,
+    )
+
+
+def text_response(text: str = "", headers: dict = {}, status=HTTP_200) -> str:
+    default_headers = {
+        "content-type": "text/plain",
+        "content-length": len(text),
+    }
+    for k, v in headers.items():
+        default_headers[k.lower()] = v
+
+    resp = resp_str(status, default_headers, text)
+    return resp
+
+
+def file_response(
+    file_path: str, f_type="text", content_type="text/plain"
+) -> bytes | None:
     root_dir = ServerOptions.static_path
     file = Path(root_dir) / file_path
     if not file.exists():
         return None
 
+    if f_type == "binary":
+        contents = file.read_bytes()
+        resp = bin_response(
+            contents,
+            headers={"Content-Disposition": f"attachment; filename={file.name!r}"},
+        )
+        return resp
+
     contents = file.read_text()
-    resp = text_response(text=contents)
-    return resp
+    resp = text_response(text=contents, headers={"content-type": content_type})
+    return resp.encode("utf-8")
 
 
 def download_file(file_path: str, contents: str | bytes) -> None:
     root_dir = ServerOptions.static_path
     file = Path(root_dir) / file_path
     file.parent.mkdir(parents=True, exist_ok=True)
+    mode = "w"
     if isinstance(contents, bytes):
-        contents = contents.decode("utf-8")
+        mode = "wb"
 
-    with open(file.as_posix(), "w") as f:
+    with open(file.as_posix(), mode) as f:
         f.write(contents)  # type: ignore
 
 
@@ -209,7 +250,13 @@ class Server:
     def handle_client(self, client: socket.socket):
         data = ""
         logger.info(f"Client connected: {client.getpeername()}")
-        client.settimeout(0.05)
+        # TODO: figure out how to do this without Timeout
+        # maybe -> 411 Length Required
+        # basically wait till end of headers and check content-length is
+        # present or not
+        # or go back to event loop
+        #       event loop needs to be thought about interleaving other requests
+        client.settimeout(7.0)
         while True:
             # yield IoWaitType.Recv, client
             try:
@@ -226,7 +273,10 @@ class Server:
         logger.debug(f"{request=}")
         resp = self.get_response(request)
         # yield IoWaitType.Send, client
-        client.sendall(resp.encode("utf-8"))
+        if not isinstance(resp, bytes):
+            resp = resp.encode("utf-8")
+
+        client.sendall(resp)
         client.close()
 
     def serve(self, address: tuple[str, int]):
@@ -269,10 +319,10 @@ def setup_defaults(host: str, port: int):
             got = file_response(fname)
             if got is not None:
                 resp = got
+                return resp
             else:
                 resp = HTTP_400
-
-            return resp + "\r\n\r\n"
+                return resp + "\r\n\r\n"
 
         if req.method == "POST":
             got = download_file(fname, req.body)

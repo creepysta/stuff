@@ -1,6 +1,6 @@
 # A very lite http server
 
-Sample use case - 
+Sample use case -
 ```python
 import re
 from litehttp import HTTP_201, HTTP_400, Loop, Request, Server

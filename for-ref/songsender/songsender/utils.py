@@ -7,16 +7,17 @@ import tempfile
 import time
 from contextlib import contextmanager
 from functools import wraps
+from glob import glob
+from logging import Logger
 from pathlib import Path
 from uuid import uuid4
 
 import requests
 import youtube_dl
 from bs4 import BeautifulSoup
+from redis import Redis
 
 from .logger import logger
-from redis import Redis
-from logging import Logger
 
 
 def get_uid(n=5):
@@ -46,6 +47,7 @@ def submit_helper(fn, *, uid: str, store: Redis, logger: Logger, **kwargs):
     logger.info(f"[submit_helper] {fn=}, {uid=}, {store=}, {kwargs=}")
     store.set(uid, fn(**kwargs))
 
+
 def ytdl_hook(d):
     if d["status"] == "finished":
         logger.info(f"Done downloading, now converting {d=}...")
@@ -54,24 +56,37 @@ def ytdl_hook(d):
 @contextmanager
 def prepare_temp_dir():
     prev_path = Path()
-    download_dir = tempfile.tempdir or f"/tmp/{time.time()}"
+    with tempfile.TemporaryDirectory() as f:
+        download_dir = f
+
     path = Path(download_dir)
-    path.mkdir(parents=True)
+    path.mkdir(parents=True, exist_ok=True)
     logger.info(f"[prepare_temp_dir] Created {download_dir=}")
     os.chdir(path)
-    logger.info(f"[prepare_temp_dir] Switching to {download_dir=} from {prev_path=} ...")
+    logger.info(
+        f"[prepare_temp_dir] Switching to {download_dir=} from {prev_path=} ..."
+    )
     try:
         yield download_dir
     finally:
-        # shutil.rmtree(download_dir)
+        # need to consider to keep the files around in case same files are called repeatedly
         logger.info(f"[prepare_temp_dir] Switching back to {prev_path=}...")
         os.chdir(prev_path)
+        shutil.rmtree(download_dir)
 
 
-# @retry_with_exception(Exception, retry_cnt=3)
+def mp3_files(path: str):
+    files = glob(f"{path}/*.mp3")
+    return files
+
+
+@retry_with_exception(Exception, retry_cnt=3)
+@contextmanager
 def download_from_urls(urls: list):
     ydl_opts = {
         "format": "bestaudio/best",
+        "ignoreerrors": True,
+        "verbose": True,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -84,27 +99,11 @@ def download_from_urls(urls: list):
     }
 
     path: str
+    print("URLS DOWNLOADING: ", urls)
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        with prepare_temp_dir() as _p:
-            # ydl.download(["https://www.youtube.com/watch?v=BaW_jenozKc"])
+        with prepare_temp_dir() as path:
             ydl.download(urls)
-            path = _p
-
-    return path
-
-
-def progress(chunk=None, bytes_done=None, total_bytes=None):
-    progress = bytes_done / total_bytes
-    length = 25
-    block = int(round(length * progress))
-    perc = round(progress * 100, 2)
-    if perc > 100:
-        perc = 100.0
-    msg = "\r[{0}] {1}%".format("#" * block + "-" * (length - block), perc)
-    if progress >= 1:
-        msg += " DONE\r\n"
-    sys.stdout.write(msg)
-    sys.stdout.flush()
+            yield mp3_files(path)
 
 
 def get_urls_from_path(path: str):
@@ -118,30 +117,6 @@ def get_urls_from_path(path: str):
         return None
 
     return f"https://youtube.com/watch?v={url}"
-
-
-@retry_with_exception(Exception, retry_cnt=3)
-def download(path, dst="videos"):
-    url = get_urls_from_path(path)
-    yt = Youtube(f"https://youtube.com/watch?v={url}")
-    logger.info(f"{yt.title}:")
-    yt.formats.first().download("mp3", progress, dst, None)
-
-
-def ytplaylist(path: str = "."):
-    logger.info("Downloading...")
-    for f in os.listdir(path):
-        if ".html" in f:
-            logger.info(f"File: {f}")
-            html = open(f, "rb").read().decode()
-            bs = BeautifulSoup(html)
-            item = "yt-simple-endpoint style-scope ytd-playlist-panel-video-renderer"
-            need = bs.findAll("a", {"class": item}, href=True)
-            logger.info(f"{len(need)} songs found.")
-            for index, a in enumerate(need):
-                href = a["href"]
-                suff = href.split("v=")[1]
-                download(index + 1, suff)
 
 
 def convert(src="videos", dst="audios"):
@@ -164,13 +139,7 @@ def convert(src="videos", dst="audios"):
 def fetch_url_from_name(name):
     query = "+".join(name.split(" "))
     base_url = f"https://www.youtube.com/results?search_query={query}"
-    anchor_class = "yt-simple-endpoint style-scope ytd-video-renderer"
-    anchor_id = "video-title"
-    logger.info("#########################")
-    logger.info(base_url)
     html = requests.get(base_url).text
-    # bs = BeautifulSoup(html)
-    # need = bs.find('a', {'href': re.compile('/watch\?v=\S+')})
     got_idx = html.index("/watch?v=")
     got = html[got_idx : got_idx + 20].split("=")[1]
     need = "https://youtu.be/" + got
@@ -186,27 +155,6 @@ def read_song_names():
     with open(path, "r") as song_file:
         urls = list(map(get_urls_from_path, song_file))
         download_from_urls(urls)
-
-
-def init():
-    vid_path = "videos"
-    aud_path = "audios"
-    log_file = "log.txt"
-    songs_file = "songs"
-    retry_path = "retry"
-    if Path(log_file).exists():
-        Path(log_file).unlink()
-    # if Path(vid_path).exists():
-    #     shutil.rmtree(vid_path)
-    # if Path(aud_path).exists():
-    #     shutil.rmtree(aud_path)
-    if Path(retry_path).exists():
-        shutil.rmtree(retry_path)
-    if not Path(songs_file).exists():
-        Path(songs_file).touch()
-
-    Path(vid_path).mkdir(parents=True, exist_ok=True)
-    Path(aud_path).mkdir(parents=True, exist_ok=True)
 
 
 def retry():
@@ -227,8 +175,5 @@ def retry():
             if "title" in log[index + 1]:
                 continue
             url = line[1]
-            yt = Youtube(f"https://youtube.com/watch?v={url}")
-            logger.info(f"{yt.title}:")
-            yt.formats.first().download("mp3", progress, test_path, None)
 
     convert(src=test_path, dst="audios")

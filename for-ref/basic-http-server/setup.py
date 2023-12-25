@@ -8,6 +8,8 @@ setup(
     author_email="travisparker.thechoice93@gmail.com",
     py_modules=["litehttp"],
     python_requires=">=3.10",
-    install_requires=["wheel"],
+    install_requires=[
+        # "wheel"
+    ],
     long_description=open("README.md").read(),
 )
