@@ -1,13 +1,28 @@
-from typing import List
+class TList(list):
+    def __getitem__(self, idx):
+        if isinstance(idx, str):
+            assert len(idx) == 1
+            return super().__getitem__(ord(idx) - ord('a'))
+
+        assert isinstance(idx, int)
+        return super().__getitem__(idx)
+
+    def __setitem__(self, idx, val):
+        if isinstance(idx, str):
+            assert len(idx) == 1
+            return super().__setitem__(ord(idx) - ord('a'), val)
+
+        assert isinstance(idx, int)
+        return super().__setitem__(idx, val)
 
 
 class Trie:
     ends: int
-    children: List
+    children: TList
 
     def __init__(self):
         self.ends = 0
-        self.children = [None for _ in range(26)]
+        self.children = TList([None for _ in range(26)])
 
     def __repr__(self):
         chars = [
@@ -24,11 +39,10 @@ class Mgr:
     def insert(self, word: str):
         temp = self.root
         for c in word:
-            ch = ord(c) - ord('a')
-            if not temp.children[ch]:
-                temp.children[ch] = Trie()
+            if not temp.children[c]:
+                temp.children[c] = Trie()
 
-            temp = temp.children[ch]
+            temp = temp.children[c]
 
 
         temp.ends += 1
@@ -46,22 +60,21 @@ class Mgr:
         temp = self.root
         curr = ""
         for c in word:
-            ch = ord(c) - ord('a')
-            if not temp.children[ch]:
+            if not temp.children[c]:
                 return None
 
             curr += c
-            temp = temp.children[ch]
+            temp = temp.children[c]
 
         return self._search(temp, curr)
 
 """
-words = ["hello", "heyy", "there", "delilah", "how", "are", "you"]
+words = ["hello", "heyy", "there", "delilah", "how", "are", "you", "gonna", "delete", "your", "armchair", "yourself"]
 m = Mgr()
 for word in words:
     m.insert(word)
 
-for pref in ["h", "he", "hel", "hey", "de", "del", "ar", "a", "y"]:
+for pref in ["h", "he", "hel", "hey", "de", "del", "ar", "a", "y", "your", "yours"]:
     got = m.search(pref)
     print("PREFIX:", pref)
     if not got:
@@ -69,7 +82,4 @@ for pref in ["h", "he", "hel", "hey", "de", "del", "ar", "a", "y"]:
 
     for w in got:
         print(w)
-
-return 0
 """
-
