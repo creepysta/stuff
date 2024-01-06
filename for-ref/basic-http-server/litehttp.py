@@ -5,10 +5,12 @@ import sys
 from argparse import ArgumentParser
 from collections import deque
 from enum import Enum
+from functools import cached_property
 from pathlib import Path
 from select import select
 from threading import Thread
 from urllib.parse import parse_qsl, urlparse
+from uuid import uuid4
 
 logger = logging.getLogger("litehttp")
 logger.setLevel(logging.DEBUG)
@@ -52,6 +54,10 @@ class Request:
     @property
     def request(self) -> list[str]:
         return self._data[0].split(" ")
+
+    @cached_property
+    def request_id(self):
+        return uuid4().hex
 
     @property
     def remote_addr(self):
@@ -108,6 +114,9 @@ class Request:
         """
         got_headers = self._header_end > -1
         is_valid = got_headers and (self._body_len is not None)
+        if got_headers and self.method == "GET":
+            return True, 0
+
         if not is_valid:
             return False, 411
         return self._got_body, 0
@@ -282,13 +291,17 @@ class Server:
         self.handlers = handlers
         self.loop = loop
 
-    def get_response(self, req: Request) -> str:
-        resp = HTTP_404 + "\r\n\r\n"
-        for fn, handler in self.handlers:
-            if fn(req.path) is True:
-                return handler(req)
+    def get_response(self, request: Request) -> str:
+        logger.debug(f"{request=}")
 
-        return resp
+        if request._is_done[1] == 411:
+            return text_response(status=HTTP_411)
+
+        for fn, handler in self.handlers:
+            if fn(request.path) is True:
+                return handler(request)
+
+        return text_response(status=HTTP_404)
 
     def handle_client(self, client: socket.socket):
         data = ""
@@ -318,11 +331,7 @@ class Server:
             resp = text_response(status=HTTP_400)
         else:
             request = Request(data, req_addr)
-            logger.debug(f"{request=}")
-            if request._is_done[1] == 411:
-                resp = text_response(status=HTTP_411)
-            else:
-                resp = self.get_response(request)
+            resp = self.get_response(request)
 
         # yield IoWaitType.Send, client
         if not isinstance(resp, bytes):

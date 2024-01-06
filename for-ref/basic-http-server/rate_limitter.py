@@ -59,10 +59,28 @@ class _FixedWindowCounter:
     def __init__(self, limit, window):
         self.limit = limit
         self.window = window
-        self.curr_window = 0
+        self.curr_window = []
+        self.last_upd = time.time()
 
     def can_make_req(self):
-        pass
+        return len(self.curr_window) <= self.limit
+
+    def reset_window(self):
+        now = time.time()
+        if now - self.last_upd > self.window:
+            self.curr_window = []
+
+    def make_req(self) -> bool:
+        self.reset_window()
+        if self.can_make_req():
+            self.curr_window.append(None)
+            return True
+
+        return False
+
+    def __repr__(self):
+        args = ",".join([f"{k}={v!r}" for k, v in vars(self).items()])
+        return f"{type(self).__name__}({args})"
 
 
 class FixedWindowCounter:
@@ -82,6 +100,7 @@ class FixedWindowCounter:
 # ----------------------------------------------------------------#
 
 tb = TokenBucket(10, 1)
+wc = FixedWindowCounter(10, 1)
 
 
 def handle_root(req: Request):
