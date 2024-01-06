@@ -56,5 +56,8 @@ def test_download():
     assert url.startswith("https://youtu.be")
     suff = url.split("/")[-1]
     assert len(suff) > 0
-    download_from_urls([url])
+    import time
+    with download_from_urls([url]) as p:
+        print("PATH:", p)
+        time.sleep(60)
     assert False

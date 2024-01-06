@@ -26,6 +26,8 @@ HTTP_204 = "HTTP/1.1 204 No Content"
 HTTP_400 = "HTTP/1.1 400 Bad Request"
 HTTP_404 = "HTTP/1.1 404 Not Found"
 HTTP_302 = "HTTP/1.1 302 Found"
+HTTP_411 = "HTTP/1.1 411 Length Required"
+HTTP_429 = "HTTP/1.1 429 Too Many Requests"
 
 
 class ServerOptions:
@@ -39,14 +41,21 @@ class IoWaitType(Enum):
 
 
 class Request:
-    def __init__(self, data: str):
+    def __init__(self, data: str, source):
         self._data = data.split("\r\n")
         self._body_start = -1
+        self._header_end = -1
+        self._body_end = -1
+        self._source = source
         assert len(self._data) >= 2, "invalid request"
 
     @property
     def request(self) -> list[str]:
         return self._data[0].split(" ")
+
+    @property
+    def remote_addr(self):
+        return self._source
 
     @property
     def protocol(self) -> str:
@@ -73,16 +82,49 @@ class Request:
         return self.request[0]
 
     @property
+    def _body_len(self) -> int | None:
+        l = self.headers.get("content-length")
+        if l is None:
+            return None
+        return int(l)
+
+    @property
+    def _got_body(self) -> bool:
+        expected = self._body_len
+        if expected is None:
+            return False
+        got = len(self.body) >= expected
+        if got:
+            self._body_end = expected
+
+        return got
+
+    @property
+    def _is_done(self) -> tuple[bool, int]:
+        """
+        The tuple can be interpreted as (is_done, content-length header present?)
+        If content-length is not set in headers, it will return False, 411
+        If the entire request has arrived the it returns True, 0
+        """
+        got_headers = self._header_end > -1
+        is_valid = got_headers and (self._body_len is not None)
+        if not is_valid:
+            return False, 411
+        return self._got_body, 0
+
+    @property
     def headers(self) -> dict:
         rv = {}
         for i, line in enumerate(self._data[1:]):
             if not line:
-                if self._body_start == -1:
-                    self._body_start = i + 2
+                if self._header_end == -1:
+                    self._header_end = i + 2
                 break
 
             pos = line.index(":")
-            name, val = line[:pos].strip(), line[pos + 1 :].strip()
+            name, val = tuple(
+                map(lambda x: x.strip().lower(), (line[:pos], line[pos + 1 :]))
+            )
             rv[name] = val
 
         return rv
@@ -91,10 +133,11 @@ class Request:
     def body(self) -> str:
         # TODO: body may contain binary data
         _ = self.headers  # prime the body pos just in case
-        if self._body_start == -1 or self._body_start > len(self._data):
+        if self._header_end == -1:  # or self._header_end > len(self._data):
             return ""
 
-        return "\n".join(self._data[self._body_start :])
+        body = "\n".join(self._data[self._header_end :])
+        return body
 
     def json(self) -> dict:
         return json.loads(self.body)
@@ -249,14 +292,11 @@ class Server:
 
     def handle_client(self, client: socket.socket):
         data = ""
-        logger.info(f"Client connected: {client.getpeername()}")
-        # TODO: figure out how to do this without Timeout
-        # maybe -> 411 Length Required
-        # basically wait till end of headers and check content-length is
-        # present or not
-        # or go back to event loop
-        #       event loop needs to be thought about interleaving other requests
-        client.settimeout(7.0)
+        req_addr = client.getpeername()
+        logger.info(f"Client connected: {req_addr}")
+        # maybe consider max timeout for which the server waits for client
+        # client.settimeout(60.0)
+        request: Request
         while True:
             # yield IoWaitType.Recv, client
             try:
@@ -265,13 +305,25 @@ class Server:
                 break
             logger.debug(f"Read chunk {len(r)=} | {r=}")
             data += r.decode("utf-8")
-            if not r:  # or len(r) < 1024:
-                break
+            if data:
+                request = Request(data, req_addr)
+                if any(request._is_done):
+                    break
+
+            # if not r:  # or len(r) < 1024:
+            #     break
 
         logger.debug(f"{data=}")
-        request = Request(data)
-        logger.debug(f"{request=}")
-        resp = self.get_response(request)
+        if not data:
+            resp = text_response(status=HTTP_400)
+        else:
+            request = Request(data, req_addr)
+            logger.debug(f"{request=}")
+            if request._is_done[1] == 411:
+                resp = text_response(status=HTTP_411)
+            else:
+                resp = self.get_response(request)
+
         # yield IoWaitType.Send, client
         if not isinstance(resp, bytes):
             resp = resp.encode("utf-8")
@@ -301,7 +353,7 @@ class Server:
 def setup_defaults(host: str, port: int):
     def handle_root(req: Request):
         assert req.path == "/"
-        return HTTP_200 + "\r\n\r\n"
+        return text_response(status=HTTP_200)
 
     def handle_echo(req: Request):
         msg = req.path.split("/")[-1]
@@ -321,12 +373,11 @@ def setup_defaults(host: str, port: int):
                 resp = got
                 return resp
             else:
-                resp = HTTP_400
-                return resp + "\r\n\r\n"
+                return text_response(status=HTTP_400)
 
         if req.method == "POST":
             got = download_file(fname, req.body)
-            resp = HTTP_201 + "\r\n\r\n"
+            resp = text_response(status=HTTP_201)
             return resp
 
     handlers = [
