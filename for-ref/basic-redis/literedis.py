@@ -2,6 +2,8 @@
 import logging
 import socket
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 from argparse import ArgumentParser
 from enum import Enum
 from threading import Thread
@@ -397,7 +399,20 @@ class Redis:
         s: set = self._get(key)  # type: ignore
         return list(s)
 
-    def save(self) -> str:
+    @contextmanager
+    def _aof(self):
+        aof = Path('redis.aof')
+        if not aof.exists():
+            aof.write_text("")
+
+        with aof.open("a") as f:
+            yield f
+
+    def save(self, query: str) -> str:
+        q = query.replace("\r\n", "\\r\\n")
+
+        with self._aof() as f:
+            f.write(q + "\n")
         return "OK"
 
 
@@ -694,7 +709,7 @@ def serialize_data(data) -> str:
             return serialize_null()
 
 
-def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType, Any]:
+def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType | None, Any]:
     match command.upper():
         case CommandType.Ping:
             return CommandType.Ping, serialize_data("PONG")
@@ -810,14 +825,28 @@ def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType,
             resp = store.smembers(body[0])
             rv = serialize_data(resp)
             return CommandType.Smembers, rv
-        case CommandType.Save:
-            resp = store.save()
-            rv = serialize_data(resp)
-            return CommandType.Save, rv
         case CommandType.Client:
             return CommandType.Client, serialize_data("Ok")
         case _:
             return None, serialize_error(Error("Invalid command: {command=} | {body=}"))
+
+
+def recover(store: Redis):
+    aof = Path("redis.aof")
+    if not aof.exists():
+        return
+
+    rv = []
+    hist = aof.read_text()
+    for query in hist.split('\n'):
+        if not query: continue
+        data = query.replace('\\r\\n', '\r\n')
+        tokens = parse_crlf(data)
+        res: list = parse_data(tokens)  # type: ignore
+        got = handle_command(res[0], res[1:], store)
+        rv.append(got)
+
+    return rv
 
 
 def get_response(data):
@@ -826,6 +855,7 @@ def get_response(data):
     logger.debug(f"{res=}")
     match res:
         case list() if len(res) > 0:
+            store.save(data)
             rv = handle_command(res[0], res[1:], store)
             return rv
         case _:
@@ -882,6 +912,7 @@ def main(argv: list[str] | None = None):
         host = "localhost"
         port = 6379
         logger.info(f"Server listening on {host=}, {port=}")
+        recover(store)
         serve(host, port)
 
 

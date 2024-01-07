@@ -1,5 +1,6 @@
 import pytest
 
+from pathlib import Path
 from literedis import (
     BulkString,
     CommandType,
@@ -10,6 +11,7 @@ from literedis import (
     parse_crlf,
     parse_data,
     serialize_data,
+    recover,
 )
 
 int_data = [
@@ -71,11 +73,27 @@ set_data = [
         {1, 2, 3, 4, BulkString(5, "hello")},
     ),
 ]
+save_cmds = [
+    (["SET", BulkString(3, "Foo"), 1], 1),
+    (["INCR", BulkString(3, "Foo")], 1),
+    (["DECR", BulkString(3, "Foo")], -1),
+    (["LPUSH", BulkString(3, "Foo"), 1, 2, 3], [3,2,1]),
+    (["RPUSH", BulkString(3, "Foo"), 1, 2, 3], [1,2,3]),
+    (["HSET",  "Foo", "Foo", "Bar", "Bar", "Baz"], {"Foo": "Bar", "Bar": "Baz"}),
+    (["SADD", "Foo", "foo:2", "bar"], {"foo:2", "bar"}),
+]
 
 
 @pytest.fixture
 def store():
     return Redis()
+
+
+@pytest.fixture
+def aof_file():
+    aof = Path('redis.aof')
+    yield aof
+    aof.write_text("")
 
 
 @pytest.mark.parametrize("data,expected", int_data)
@@ -287,11 +305,14 @@ def test_lrange(store: Redis, low, high):
     assert rv == expected
 
 
-def test_save(store: Redis):
-    cmd_type, res = handle_command("save", [], store)
-    rv = parse_data(parse_crlf(res))
-    assert cmd_type == CommandType.Save
-    assert rv == "OK"
+@pytest.mark.parametrize("cmd, expected", save_cmds)
+def test_save(store: Redis, aof_file: Path, cmd, expected):
+    store.save(serialize_data(cmd))
+    content = aof_file.read_text()
+    rv = parse_data(parse_crlf(content))
+    recover(store)
+    rv = store.store.get("Foo")
+    assert rv == expected
 
 
 def test_hset_no_prev(store: Redis):
