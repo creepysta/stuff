@@ -9,6 +9,7 @@ from functools import cached_property
 from pathlib import Path
 from select import select
 from threading import Thread
+from time import perf_counter
 from urllib.parse import parse_qsl, urlparse
 from uuid import uuid4
 
@@ -112,8 +113,11 @@ class Request:
         If content-length is not set in headers, it will return False, 411
         If the entire request has arrived the it returns True, 0
         """
+        body_sz = (
+            self._body_len
+        )  # until self.headers is called, self._header_end won't get updated
         got_headers = self._header_end > -1
-        is_valid = got_headers and (self._body_len is not None)
+        is_valid = got_headers and (body_sz is not None)
         if got_headers and self.method == "GET":
             return True, 0
 
@@ -292,16 +296,21 @@ class Server:
         self.loop = loop
 
     def get_response(self, request: Request) -> str:
-        logger.debug(f"{request=}")
-
+        rid = request.request_id
+        logger.info(f"[{type(self).__name__}] Processing request: {rid} | {request=}")
+        prev = perf_counter()
+        res = text_response(status=HTTP_404)
         if request._is_done[1] == 411:
-            return text_response(status=HTTP_411)
+            res = text_response(status=HTTP_411)
+        else:
+            for fn, handler in self.handlers:
+                if fn(request.path) is True:
+                    res = handler(request)
+                    break
 
-        for fn, handler in self.handlers:
-            if fn(request.path) is True:
-                return handler(request)
-
-        return text_response(status=HTTP_404)
+        time_taken = perf_counter() - prev
+        logger.info(f"[{type(self).__name__}] Request: {rid} took - {time_taken}s")
+        return res
 
     def handle_client(self, client: socket.socket):
         data = ""
@@ -326,7 +335,7 @@ class Server:
             # if not r:  # or len(r) < 1024:
             #     break
 
-        logger.debug(f"{data=}")
+        logger.debug(f"Finished parsing {data=}")
         if not data:
             resp = text_response(status=HTTP_400)
         else:
