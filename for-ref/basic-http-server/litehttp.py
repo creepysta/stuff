@@ -2,6 +2,7 @@ import json
 import logging
 import socket
 import sys
+import time
 from argparse import ArgumentParser
 from collections import deque
 from enum import Enum
@@ -317,20 +318,43 @@ class Server:
         req_addr = client.getpeername()
         logger.info(f"Client connected: {req_addr}")
         # maybe consider max timeout for which the server waits for client
-        # client.settimeout(60.0)
+        client.settimeout(60.0)
         request: Request
+        retries, max_retries = 0, 5
         while True:
             # yield IoWaitType.Recv, client
             try:
                 r = client.recv(1024)
             except TimeoutError:
-                break
+                logger.exception(f"Timeout waiting for client to send {data=}.")
+                client.close()
+                return
+
             logger.debug(f"Read chunk {len(r)=} | {r=}")
             data += r.decode("utf-8")
+            if retries > max_retries:
+                logger.error(
+                    f"Invalid input {data=}. Max retries of {max_retries} reached"
+                )
+                client.close()
+                return
+
             if data:
-                request = Request(data, req_addr)
-                if any(request._is_done):
-                    break
+                try:
+                    request = Request(data, req_addr)
+                    if any(request._is_done):
+                        break
+                except Exception as e:
+                    retries += 1
+                    logger.exception(
+                        f"Failed to parse request with {e=}. Retry: {retries=}/{max_retries=}"
+                    )
+                    time.sleep(0.1)
+            else:
+                # no data
+                retries += 1
+                logger.warn(f"Got no data for {retries=}/{max_retries=}.")
+                time.sleep(0.1)
 
             # if not r:  # or len(r) < 1024:
             #     break
@@ -370,7 +394,6 @@ class Server:
 
 def setup_defaults(host: str, port: int):
     def handle_root(req: Request):
-        assert req.path == "/"
         return text_response(status=HTTP_200)
 
     def handle_echo(req: Request):
@@ -402,7 +425,7 @@ def setup_defaults(host: str, port: int):
         (lambda path: path.startswith("/echo/"), handle_echo),
         (lambda path: path == "/user-agent", handle_user_agent),
         (lambda path: path.startswith("/files"), handle_files),
-        (lambda path: path.startswith("/"), handle_root),
+        (lambda path: path == "/", handle_root),
     ]
 
     server = Server(loop=Loop(), handlers=handlers)

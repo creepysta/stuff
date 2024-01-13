@@ -409,6 +409,10 @@ class Redis:
             yield f
 
     def save(self, query: str) -> str:
+        if "GET" in query:
+            logger.info(f"Skipping to persist READ {query=}")
+            return "OK"
+
         q = query.replace("\r\n", "\\r\\n")
 
         with self._aof() as f:
@@ -843,7 +847,12 @@ def recover(store: Redis):
         data = query.replace('\\r\\n', '\r\n')
         tokens = parse_crlf(data)
         res: list = parse_data(tokens)  # type: ignore
-        got = handle_command(res[0], res[1:], store)
+        try:
+            got = handle_command(res[0], res[1:], store)
+        except Exception as e:
+            logger.warning(f"Failed to recover {query=} with error: {e=}")
+            continue
+
         rv.append(got)
 
     return rv
@@ -869,6 +878,7 @@ def get_response(data):
 
 def read_data(client: socket.socket) -> str:
     data = ""
+    client.settimeout(60.0)
     while r := client.recv(1024):
         data += r.decode("utf-8")
         if len(r) < 1024 or not r:
@@ -881,10 +891,14 @@ def handle_client(client: socket.socket):
     logger.info(f"Client connected: {client.getpeername()}")
     while data := read_data(client):
         logger.debug(f"Got data: {data=}")
-        ctype, res = get_response(data)
-        logger.debug(f"Response: {res=}")
-        client.sendall(res.encode("utf-8"))
-        if ctype is None:
+        try:
+            ctype, res = get_response(data)
+            logger.debug(f"Response: {res=}")
+            client.sendall(res.encode("utf-8"))
+            if ctype is None:
+                break
+        except Exception as e:
+            logger.exception(f"Invalid command: {data}. Failed with error: {e}")
             break
 
     client.close()
