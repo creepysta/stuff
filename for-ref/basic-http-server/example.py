@@ -1,24 +1,39 @@
-import re
+import time
 
-from litehttp import HTTP_201, HTTP_400, Loop, Request, Server
+from litehttp import HTTP_201, HTTP_204, HTTP_400, Loop, Request, Server, json_response, text_response, stream_response
 
 
 def handle_root(req: Request):
-    resp = HTTP_400
+    if req.method == "GET":
+        return text_response(text="Howdy!")
+
     if req.method == "POST":
-        print(f"POST: {req.json()=}")
-        resp = HTTP_201
+        return json_response(data={'message': "created"}, status=HTTP_201)
 
     if req.method == "DELETE":
-        print(f"DELETE: {req=}")
-        resp = HTTP_201
+        return json_response(data={'message': "deleted"})
 
-    return resp + "\r\n\r\n"
+    if req.method == "PUT":
+        return text_response(status=HTTP_204)
+
+    return text_response(status=HTTP_400)
+
+
+def sse_resp(req: Request):
+    print("SSE: ", req)
+    message = req.path.split("/")[-1]
+    def stream():
+        for _ in range(10):
+            time.sleep(0.1)
+            yield f"data: {message=}\r\n"
+
+    return stream_response(stream())
 
 
 handlers = [
-    (lambda x: re.search(r"/(\S+)?", x) is not None, handle_root),
+    (lambda x: x == "/", handle_root),
+    (lambda x: x.startswith("/sse/"), sse_resp),
 ]
 
 server = Server(loop=Loop(), handlers=handlers)
-server.run()
+server.run(port=5000)

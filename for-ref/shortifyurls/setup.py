@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 from setuptools import setup
 
@@ -10,10 +10,6 @@ setup(
     author_email="travisparker.thechoice93@gmail.com",
     py_modules=["shortifyurls"],
     python_requires=">=3.10",
-    install_requires=[
-        "wheel",
-        "redis",
-        # f"litehttp @ http://localhost/{os.getcwd()}/local_wheels/litehttp-0.0.1-py3-none-any.whl",
-    ],
+    install_requires=Path("./requirements.txt").read_text().splitlines(),
     entry_points={"console_scripts": ["shortifyurls = shortifyurls:main"]},
 )

@@ -1,2 +1,2 @@
-./local_wheels/litehttp-0.0.1-py3-none-any.whl
+git+https://github.com/creepysta/stuff#egg=litehttp&subdirectory=for-ref/basic-http-server
 redis==5.0.1

@@ -1,3 +1,4 @@
-./lib/litehttp-0.0.1-py3-none-any.whl
 youtube-dl
 beautifulsoup4
+requests
+git+https://github.com/creepysta/stuff#egg=litehttp&subdirectory=for-ref/basic-http-server

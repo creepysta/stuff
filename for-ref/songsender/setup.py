@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 from setuptools import setup
 
@@ -10,11 +10,6 @@ setup(
     author_email="travisparker.thechoice93@gmail.com",
     python_requires=">=3.10",
     packages=["songsender"],
-    install_requires=[
-        "youtube-dl",
-        "beautifulsoup4",
-        "requests",
-        # f"litehttp @ http://localhost/{os.getcwd()}/local_wheels/litehttp-0.0.1-py3-none-any.whl",
-    ],
+    install_requires=Path("./requirements.txt").read_text().splitlines(),
     entry_points={"console_scripts": ["songsender = songsender.__main__:main"]},
 )

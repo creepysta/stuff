@@ -10,6 +10,7 @@ from functools import cached_property
 from pathlib import Path
 from select import select
 from threading import Thread
+from typing import Generator
 from time import perf_counter
 from urllib.parse import parse_qsl, urlparse
 from uuid import uuid4
@@ -215,9 +216,12 @@ def redirect_response(url: str) -> str:
     return text_response(headers={"location": url}, status=HTTP_302)
 
 
-def resp_str(status, headers: dict, data=None):
+def _resp_str(status, headers: dict, data=None, add_terminator=False):
     hs = [f"{k}: {v}" for k, v in headers.items()]
     payload = [status, *hs, ""]
+    if add_terminator:
+        payload.append("")
+
     if data:
         payload.append(data)
 
@@ -225,15 +229,18 @@ def resp_str(status, headers: dict, data=None):
     return resp
 
 
+def _merge_headers(dest: dict, headers: dict):
+    for k, v in headers.items():
+        dest[k.lower()] = v
+
+
 def bin_response(data: bytes, headers: dict = {}, status=HTTP_200) -> bytes:
     default_headers = {
         "content-type": "application/octet-stream",
         "content-length": len(data),
     }
-    for k, v in headers.items():
-        default_headers[k.lower()] = v
-
-    resp = resp_str(status, default_headers).encode("utf-8")
+    _merge_headers(default_headers, headers)
+    resp = _resp_str(status, default_headers).encode("utf-8")
     newline = "\r\n".encode("utf-8")
     return resp + newline + data + newline
 
@@ -246,15 +253,36 @@ def json_response(data: dict, headers: dict = {}, status=HTTP_200) -> str:
     )
 
 
+def stream_response(data: Generator[str | bytes, None, None], headers: dict = {}, status=HTTP_200):
+    """
+    The client must be speaking HTTP/1.1 or newer
+    The request method wasn’t a HEAD
+    The response does not include a Content-Length header
+    The response status wasn’t 204 or 304
+    """
+    default_headers = {
+        "content-type": "text/event-stream",
+        # for now commented since we need to figure out how to send chunked data
+        # format: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding#chunked_encoding
+        # "transfer-encoding": "chunked",
+        "connection": "keep-alive",
+        "cache-control": "no-cache",
+    }
+    _merge_headers(default_headers, headers)
+    resp_h = _resp_str(status, default_headers, add_terminator=True)
+    yield resp_h
+    yield from data
+    # yield from (f"{len(row)}\r\n{row}\r\n" for row in data)
+    # yield f"0\r\n\r\n"
+
+
 def text_response(text: str = "", headers: dict = {}, status=HTTP_200) -> str:
     default_headers = {
         "content-type": "text/plain",
         "content-length": len(text),
     }
-    for k, v in headers.items():
-        default_headers[k.lower()] = v
-
-    resp = resp_str(status, default_headers, text)
+    _merge_headers(default_headers, headers)
+    resp = _resp_str(status, default_headers, text)
     return resp
 
 
@@ -266,6 +294,7 @@ def file_response(
     if not file.exists():
         return None
 
+    # TODO: Consider streaming files as well (large file maybe?)
     if f_type == "binary":
         contents = file.read_bytes()
         resp = bin_response(
@@ -367,6 +396,16 @@ class Server:
             resp = self.get_response(request)
 
         # yield IoWaitType.Send, client
+        if  isinstance(resp, Generator):
+            for row in resp:
+                if not isinstance(row, bytes):
+                    row = row.encode("utf-8")
+
+                client.sendall(row)
+
+            client.close()
+            return
+
         if not isinstance(resp, bytes):
             resp = resp.encode("utf-8")
 
@@ -393,6 +432,9 @@ class Server:
 
 
 def setup_defaults(host: str, port: int):
+    """
+    This was part of codecrafters.io challenge
+    """
     def handle_root(req: Request):
         return text_response(status=HTTP_200)
 
