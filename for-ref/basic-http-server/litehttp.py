@@ -288,11 +288,11 @@ def text_response(text: str = "", headers: dict = {}, status=HTTP_200) -> str:
 
 def file_response(
     file_path: str, f_type="text", content_type="text/plain"
-) -> bytes | None:
+) -> bytes | str:
     root_dir = ServerOptions.static_path
     file = Path(root_dir) / file_path
     if not file.exists():
-        return None
+        return text_response(status=HTTP_404)
 
     # TODO: Consider streaming files as well (large file maybe?)
     if f_type == "binary":
@@ -305,7 +305,7 @@ def file_response(
 
     contents = file.read_text()
     resp = text_response(text=contents, headers={"content-type": content_type})
-    return resp.encode("utf-8")
+    return resp
 
 
 def download_file(file_path: str, contents: str | bytes) -> None:
@@ -451,12 +451,8 @@ def setup_defaults(host: str, port: int):
     def handle_files(req: Request):
         fname = "/".join(req.path.split("/")[2:])
         if req.method == "GET":
-            got = file_response(fname)
-            if got is not None:
-                resp = got
-                return resp
-            else:
-                return text_response(status=HTTP_400)
+            resp = file_response(fname)
+            return resp
 
         if req.method == "POST":
             got = download_file(fname, req.body)
