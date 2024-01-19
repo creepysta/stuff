@@ -1,2 +1,2 @@
-git+https://github.com/creepysta/stuff#egg=litehttp&subdirectory=for-ref/basic-http-server
+litehttp @ git+https://github.com/creepysta/stuff@master#egg=litehttp&subdirectory=for-ref/basic-http-server
 redis==5.0.1

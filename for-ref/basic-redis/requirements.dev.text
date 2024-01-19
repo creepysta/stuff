@@ -1,5 +1,4 @@
 pytest
-wheel
 build
 isort
 black

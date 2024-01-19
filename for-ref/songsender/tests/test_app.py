@@ -57,6 +57,7 @@ def test_download():
     suff = url.split("/")[-1]
     assert len(suff) > 0
     import time
+
     with download_from_urls([url]) as p:
         print("PATH:", p)
         time.sleep(60)
