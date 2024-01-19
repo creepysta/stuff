@@ -322,6 +322,7 @@ def download_file(file_path: str, contents: str | bytes) -> None:
 
 class Server:
     def __init__(self, handlers, loop):
+        # TODO: consider paths separately to parse the params in the path
         self.handlers = handlers
         self.loop = loop
 
@@ -343,6 +344,7 @@ class Server:
         return res
 
     def handle_client(self, client: socket.socket):
+        # TODO: consider bytes, since the data may include files for form data
         data = ""
         req_addr = client.getpeername()
         logger.info(f"Client connected: {req_addr}")

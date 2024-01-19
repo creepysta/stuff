@@ -1,4 +1,4 @@
 beautifulsoup4
 requests
-git+https://github.com/creepysta/stuff#egg=litehttp&subdirectory=for-ref/basic-http-server
-git+https://github.com/ytdl-org/youtube-dl@be008e657d79832642e2158557c899249c9e31cd
+litehttp @ git+https://github.com/creepysta/stuff@master#egg=litehttp&subdirectory=for-ref/basic-http-server
+youtube_dl @ git+https://github.com/ytdl-org/youtube-dl@be008e657d79832642e2158557c899249c9e31cd
