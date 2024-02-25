@@ -133,8 +133,8 @@ class Node:
         #     return
 
         # consider saving the message if it comes from the client
-        # if msg.src not in self.all_nodes:
-        self._received.append(msg.message_content)
+        if msg.src not in self.all_nodes:
+            self._received.append(msg.message_content)
 
         for node in self.connections:
             if node in [msg.src, self.node_id]:
