@@ -230,6 +230,7 @@ class Redis:
         self.set(key, int(self.get(key) or 0) - 1)
         return self._get(key)  # type: ignore
 
+    # https://web.archive.org/web/20201108091210/http://effbot.org/pyfaq/what-kinds-of-global-value-mutation-are-thread-safe.htm
     def lpush(self, key: str, vals: list) -> int | None:
         item = self._get(key)  # type: ignore
         if item is None:
@@ -239,9 +240,7 @@ class Redis:
             return None
 
         item: list = self._get(key)  # type: ignore
-        for val in vals:
-            item.insert(0, val)
-
+        item[0:0] = vals[::-1]
         return len(self._get(key))  # type: ignore
 
     def rpush(self, key: str, vals: list) -> int | None:
