@@ -1233,10 +1233,7 @@ def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType 
             resp = store.handle_config(body[0], *body[1:])
             return CommandType.Config, serialize_data(resp)
         case CommandType.Keys:
-            # TODO: [codecrafters] revert change for passing
-            s = RdbParser(store._rdb_file(), None).parse()
-            resp = s.keys(body[0], *body[1:])
-            # resp = store.keys(body[0], *body[1:])
+            resp = store.keys(body[0], *body[1:])
             return CommandType.Config, serialize_data(resp)
         case CommandType.Type:
             resp = store.entry_type(body[0])
