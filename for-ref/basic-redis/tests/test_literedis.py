@@ -12,6 +12,7 @@ from literedis import (
     parse_data,
     serialize_data,
     recover,
+    RdbParser
 )
 
 int_data = [
@@ -456,3 +457,20 @@ def test_trie(prefix, count):
     got = m.search(prefix)
     rv = list(got)
     assert count == len(rv)
+
+def test_rdb():
+    rdb = Path(__file__).parent / "assets" / "dump.rdb"
+    print(rdb.read_bytes())
+    store = RdbParser(rdb).parse()
+    assert store.get("mango") == "pineapple"
+
+
+def test_exp_rdb():
+    rdb = Path(__file__).parent / "assets" / "dump_exp.rdb"
+    print(rdb.read_bytes())
+    store = RdbParser(rdb).parse()
+    print(store.store)
+    assert store.get("pineapple") == "grape"
+    assert store.get("blueberry") == "apple"
+    assert store.get("orange") == "strawberry"
+    assert set(store.store.keys()) == {"pineapple", "blueberry", "orange"}
