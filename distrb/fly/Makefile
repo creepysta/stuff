@@ -15,3 +15,6 @@ broadcast_a:
 
 broadcast_b:
 	@maelstrom test -w broadcast --bin broadcast_b.py --node-count 5 --time-limit 20 --rate 10
+
+broadcast_c:
+	@maelstrom test -w broadcast --bin broadcast_c.py --node-count 5 --time-limit 20 --rate 10 --nemesis partition
