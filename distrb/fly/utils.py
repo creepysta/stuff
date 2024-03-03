@@ -5,12 +5,12 @@ from typing import Callable, Type
 
 
 def send(msg: str):
-    sys.stdout.write(msg + '\n')
+    sys.stdout.write(msg + "\n")
     sys.stdout.flush()
 
 
 def log(msg: str):
-    sys.stderr.write(msg + '\n')
+    sys.stderr.write(msg + "\n")
     sys.stderr.flush()
 
 
@@ -127,15 +127,12 @@ class Node:
 
         log(f"[{self.node_id=}] {msg._msg=} | {self._relayed=} | {self.connections=}")
 
-        # somehow commenting this passes the test.
         # this was put in so that no loop gets created for a single broadcast
-        # if msg.src in self.all_nodes and self._relayed.get(msg.msg_id):
-        #     return
+        # message content is considered instead of msg_id
+        if self._relayed.get(msg.message_content):
+            return
 
-        # consider saving the message if it comes from the client
-        # if msg.src not in self.all_nodes:
         self._received.append(msg.message_content)
-
         for node in self.connections:
             if node in [msg.src, self.node_id]:
                 continue
@@ -143,9 +140,7 @@ class Node:
             message = self.send_to(msg, node)
             send(json.dumps(message))
 
-        # consider the message to be relayed if it comes from the client
-        # if msg.src not in self.all_nodes:
-        self._relayed[msg.msg_id] = True
+        self._relayed[msg.message_content] = True
 
 
 def handler(msg_type: Type[Msg], node: Node) -> dict | None:
