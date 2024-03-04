@@ -419,44 +419,24 @@ def test_smembers(store: Redis):
     assert set(rv) == {"foo:1", "bar"}, '"foo:1", "bar" are the elements'
 
 
-@pytest.mark.parametrize(
-    "prefix,count",
-    [
-        ("h", 3),
-        ("he", 2),
-        ("hel", 1),
-        ("hey", 1),
-        ("de", 2),
-        ("del", 2),
-        ("ar", 2),
-        ("a", 2),
-        ("y", 3),
-        ("your", 2),
-        ("yours", 1),
-    ],
-)
-def test_trie(prefix, count):
-    words = [
-        "hello",
-        "heyy",
-        "there",
-        "delilah",
-        "how",
-        "are",
-        "you",
-        "gonna",
-        "delete",
-        "your",
-        "armchair",
-        "yourself",
-    ]
-    m = Trie()
-    for word in words:
-        m.insert(word)
+def test_xadd(store: Redis):
+    cmd_type, res = handle_command("XADD", ["stream_key", "0-1", "foo", "bar"], store)
+    rv = parse_data(parse_crlf(res))
+    print(rv)
+    print(store.store.get("stream_key"))
+    print(list(store.store.get("stream_key").search("0-1")))
+    assert cmd_type == CommandType.Xadd
+    assert rv == "0-1"
+    trie_ = store.store.get("stream_key")
+    assert trie_ is not None
+    assert isinstance(trie_, Trie)
+    query = trie_.search("0-1")
+    assert query is not None
+    data = list(query)
+    key, data_ = data[0]
+    assert data_ == {"foo": "bar"}
+    assert key == "0-1"
 
-    got = m.search(prefix)
-    rv = list(got)
-    assert count == len(rv)
 
 def test_rdb():
     rdb = Path(__file__).parent / "assets" / "dump.rdb"

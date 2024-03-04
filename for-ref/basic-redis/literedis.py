@@ -1,5 +1,5 @@
 # Uncomment this to pass the first stage
-from functools import cached_property
+from functools import cached_property, wraps
 import logging
 from os import PathLike
 import socket
@@ -26,10 +26,12 @@ logger.addHandler(handler)
 
 
 class TList(list):
+    low = ord('-')
+    high = ord('9')
     def __getitem__(self, idx):
         if isinstance(idx, str):
             assert len(idx) == 1
-            return super().__getitem__(ord(idx) - ord("a"))
+            return super().__getitem__(ord(idx) - self.low)
 
         assert isinstance(idx, int)
         return super().__getitem__(idx)
@@ -37,7 +39,7 @@ class TList(list):
     def __setitem__(self, idx, val):
         if isinstance(idx, str):
             assert len(idx) == 1
-            return super().__setitem__(ord(idx) - ord("a"), val)
+            return super().__setitem__(ord(idx) - self.low, val)
 
         assert isinstance(idx, int)
         return super().__setitem__(idx, val)
@@ -49,43 +51,109 @@ class TrieNode:
 
     def __init__(self):
         self.ends = 0
-        self.children = TList([None for _ in range(26)])
+        self.children = TList([None for _ in range(15)])
+        self.data = {}
 
     def __repr__(self):
         chars = [chr(i + ord("a")) for i, e in enumerate(self.children) if e]
         return f"Trie(ends={self.ends}, children={chars})"
 
 
+# TODO: convert to Radix Tree
+# https://en.wikipedia.org/wiki/Radix_tree
 class Trie:
     root: TrieNode
+    empty = True
+    error_0_0 = ValueError("The ID specified in XADD must be greater than 0-0")
+    error_key_lt_last_key = ValueError("The ID specified in XADD is equal or smaller than the target stream top item")
 
     def __init__(self):
         self.root = TrieNode()
+        self.last_key = (0, 1)
 
-    def insert(self, word: str):
+    def _gen_next_ms(self):
+        curr = int(time.time() * 1000)
+        ms, seq = self.last_key
+        if curr == ms:
+            return ms, seq + 1
+
+        return curr, 0
+
+    def _gen_next_seq(self, key: str):
+        ms = int(key.split('-')[0])
+        pms, pseq = self.last_key
+        if ms < pms:
+            raise self.error_key_lt_last_key
+
+        if self.empty:
+            return self.last_key
+
+        if ms == pms:
+            return ms, pseq + 1
+
+        return ms, 0
+
+    def _ser_parts(self, parts: tuple[int, int]):
+        return "-".join(map(str, parts))
+
+    def _gen_next_key(self, key: str):
+        if key == "*":
+            return self._gen_next_ms()
+
+        _, seq = key.split("-")
+        if seq == "*":
+            return self._gen_next_seq(key)
+
+        raise ValueError(f"Invalid {key=}")
+
+    def _check_key(self, key: str):
+        if key == "0-0":
+            raise self.error_0_0
+
+        if "*" in key:
+            return self._gen_next_key(key)
+
+        ms, seq = map(int, key.split("-"))
+        exception = self.empty and (ms, seq) == (0, 1)
+        pms, pseq = self.last_key
+        if not exception and any([ms < pms, ms == pms and seq <= pseq]):
+            raise self.error_key_lt_last_key
+
+        return ms, seq
+
+    def insert(self, key: str, data: dict | None = None):
+        parts = self._check_key(key)
+
+        key = self._ser_parts(parts)
         temp = self.root
-        for c in word:
+        for c in key:
             if not temp.children[c]:
                 temp.children[c] = TrieNode()
 
             temp = temp.children[c]
 
         temp.ends += 1
+        if data:
+            temp.data = data
 
-    def _search(self, node: TrieNode, curr=""):
+        self.last_key = parts
+        self.empty = False
+        return key
+
+    def _search(self, node: TrieNode, curr="") -> Generator[tuple[str, dict], None, None]:
         if node.ends:
-            yield curr
+            yield (curr, node.data)
 
         for i, _ in enumerate(node.children):
             temp = node.children[i]
             if not temp:
                 continue
-            yield from self._search(temp, curr + chr(ord("a") + i))
+            yield from self._search(temp, curr + chr(ord("-") + i))
 
-    def search(self, word: str):
+    def search(self, key: str):
         temp = self.root
         curr = ""
-        for c in word:
+        for c in key:
             if not temp.children[c]:
                 return None
 
@@ -93,6 +161,18 @@ class Trie:
             temp = temp.children[c]
 
         return self._search(temp, curr)
+
+    def _all(self, node: TrieNode, key=""):
+        if node.ends:
+            yield key, node.data
+
+        for i, node in enumerate(node.children):
+            if not node: continue
+            yield from self._all(node, key + chr(ord("-") + i));
+
+    def all(self):
+        return self._all(self.root)
+
 
 
 class ErrorType(Enum):
@@ -147,7 +227,7 @@ class Error(Base):
         super().__init__(msg=msg, **kwargs)
 
     def ser(self):
-        return f"-Err: {self.msg}\r\n"
+        return f"-ERR {self.msg}\r\n"
 
     def __str__(self):
         return self.msg
@@ -287,15 +367,17 @@ class Redis:
     def entry_type(self, key: str):
         match self.store.get(key):
             case str():
-                return serialize_str("string")
+                return "string"
             case list():
-                return serialize_str("list")
+                return "list"
             case set():
-                return serialize_str("set")
+                return "set"
             case dict():
-                return serialize_str("hash")
+                return "hash"
+            case Trie():
+                return "stream"
             case None:
-                return serialize_str("none")
+                return "none"
             case x:
                 raise NotImplementedError("[entry_type]", f"{x!r} not yet parsed")
 
@@ -542,6 +624,78 @@ class Redis:
 
         s: set = self._get(key)  # type: ignore
         return list(s)
+
+    def xadd(self, key: str, node_key: str, *data):
+        assert data, f"Got invalid {data=} to be stored for {key=} and ts={node_key!r}"
+        if key not in self.store:
+            self.store[key] = Trie()
+
+        trie_: Trie = self.store[key]
+        data_ = {k: v for k, v in zip(data[::2], data[1::2])}
+        node_key = trie_.insert(node_key, data_)
+        return node_key
+
+
+    def dict_to_list(self, data: dict):
+        rv = []
+        for k, v in data.items():
+            rv.extend([k, v])
+
+        return rv
+
+    def xrange(self, key: str, start: str, end: str, start_xlsv = False):
+        trie: Trie = self.store.get(key)  # type: ignore
+        if not trie:
+            raise ValueError(f"{key=} is not set currently")
+
+        items = trie.all()
+        has_start = start != "-"
+        has_end = end != "+"
+        min_seq, max_seq = 0, (1<<64) - 1
+        if has_start and "-" not in start:
+            start += f"-{min_seq}"
+
+        if has_end and "-" not in end:
+            end += f"-{max_seq}"
+
+        if has_start:
+            start_i = tuple(map(int, start.split("-")))
+
+        if has_end:
+            end_i = tuple(map(int, end.split("-")))
+
+        rv = []
+        for key, data in items:
+            ms, seq = map(int, key.split("-"))
+            condition = True
+            if has_end:
+                condition = condition and (ms, seq) <= end_i
+            if has_start:
+                if start_xlsv:
+                    condition = condition and start_i < (ms, seq)
+                else:
+                    condition = condition and start_i <= (ms, seq)
+
+            if condition:
+                rv.append([key, self.dict_to_list(data)])
+
+        return rv
+
+    def xread(self, count: int | None, block: int | None, *streams):
+        n = len(streams)
+        assert n % 2 == 0, "There should be even number of streams and corresponding Ids"
+        rv = []
+        pairs = [(name, start) for name, start in zip(streams[:n//2], streams[n//2:])]
+        if block is not None:
+            # TODO: handle 0 where the wait should be inf
+            time.sleep(block//int(1e3))
+
+        for name, start in pairs:
+            got = self.xrange(name, start, "+", start_xlsv=True)
+            if got:
+                rv.append([name, got])
+
+        return rv or BulkString(3, "nil")
 
     @classmethod
     def _aof_file(cls):
@@ -813,8 +967,7 @@ FF                          ## End of RDB file indicator
                 # the remaining 6 bits indicate the format
                 return (first_byte & lsb6), True
             case x:
-                logger.warning(f"[_parse_length] Unknown msb: {x!r}")
-                return 0, False
+                raise NotImplementedError(f"[_parse_length] Unknown msb: {x!r}")
 
 
 
@@ -850,6 +1003,11 @@ class CommandType(Enum):
     Config = "CONFIG"
     Keys = "KEYS"
     Type = "TYPE"
+    Xadd = "XADD"
+    Xrange = "XRANGE"
+    Xread = "XREAD"
+
+    Error = "Error"  # required for internal use
 
     def __eq__(self, o):
         if isinstance(o, str):
@@ -1111,6 +1269,19 @@ def serialize_data(data) -> str:
             return serialize_null()
 
 
+def handle_exceptions(func):
+    @wraps(func)
+    def inner(*args, **kwargs):
+        try:
+            rv = func(*args, **kwargs)
+            return rv
+        except Exception as e:
+            return CommandType.Error, serialize_error(Error(str(e)))
+
+    return inner
+
+
+@handle_exceptions
 def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType | None, Any]:
     match command.upper():
         case CommandType.Ping:
@@ -1202,7 +1373,7 @@ def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType 
             rv = serialize_data(resp)
             return CommandType.Hgetall, rv
         case CommandType.Hincrby:
-            raise NotImplementedError()
+            raise NotImplementedError("Not yet implemented: HINCRBY")
         case CommandType.Sadd:
             resp = store.sadd(body[0], body[1:])
             rv = serialize_data(resp)
@@ -1234,10 +1405,29 @@ def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType 
             return CommandType.Config, serialize_data(resp)
         case CommandType.Keys:
             resp = store.keys(body[0], *body[1:])
-            return CommandType.Config, serialize_data(resp)
+            return CommandType.Keys, serialize_data(resp)
         case CommandType.Type:
             resp = store.entry_type(body[0])
-            return CommandType.Type, resp
+            return CommandType.Type, serialize_str(resp)
+        case CommandType.Xadd:
+            resp = store.xadd(body[0], body[1], *body[2:])
+            return CommandType.Xadd, serialize_data(resp)
+        case CommandType.Xrange:
+            resp = store.xrange(body[0], body[1], body[2])
+            return CommandType.Xrange, serialize_data(resp)
+        case CommandType.Xread:
+            block, count = None, None
+            lowered = [x.lower() for x in body]
+            stream_start = lowered.index("streams") + 1
+            if "block" in lowered:
+                block = int(lowered[lowered.index("block") + 1])
+
+            if "count" in lowered:
+                block = int(lowered[lowered.index("count") + 1])
+
+            logger.debug(f"{block=} | {count=} | {stream_start=} | {lowered=}")
+            resp = store.xread(count, block, *body[stream_start:])
+            return CommandType.Xread, serialize_data(resp)
         case _:
             return None, serialize_error(Error("Invalid command: {command=} | {body=}"))
 
@@ -1269,7 +1459,7 @@ def recover(store: Redis):
 
 
 
-def get_response(data):
+def get_response(data, store: Redis):
     tokens = parse_crlf(data)
     res = parse_data(tokens)
     logger.debug(f"{res=}")
@@ -1298,12 +1488,12 @@ def read_data(client: socket.socket) -> str:
     return data
 
 
-def handle_client(client: socket.socket):
+def handle_client(client: socket.socket, store: Redis):
     logger.info(f"Client connected: {client.getpeername()}")
     while data := read_data(client):
         logger.debug(f"Got data: {data=}")
         try:
-            ctype, res = get_response(data)
+            ctype, res = get_response(data, store)
             logger.debug(f"Response: {res=}")
             client.sendall(res.encode("utf-8"))
             if ctype is None:
@@ -1315,9 +1505,7 @@ def handle_client(client: socket.socket):
     client.close()
 
 
-store = Redis()
-
-def serve(host: str, port: int):
+def serve(host: str, port: int, store: Redis):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     addr = (host, port)
@@ -1326,7 +1514,7 @@ def serve(host: str, port: int):
     while True:
         client, _ = sock.accept()
         # TODO: get rid of threads
-        t = Thread(target=handle_client, args=(client,))
+        t = Thread(target=handle_client, args=(client, store))
         t.start()
 
 
@@ -1337,6 +1525,7 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--dbfilename")
     args = parser.parse_args(argv)
 
+    store = Redis()
     if args.dir or args.dbfilename:
         Redis.config['dir'] = args.dir
         Redis.config['dbfilename'] = args.dbfilename
@@ -1346,7 +1535,7 @@ def main(argv: list[str] | None = None):
         port = 6379
         logger.info(f"Server listening on {host=}, {port=}")
         recover(store)
-        serve(host, port)
+        serve(host, port, store)
 
 
 if __name__ == "__main__":
