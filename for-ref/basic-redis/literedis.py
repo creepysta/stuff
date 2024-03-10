@@ -1,17 +1,16 @@
-# Uncomment this to pass the first stage
-from functools import cached_property, wraps
-import logging
-from os import PathLike
-import socket
 import io
-import sys
+import logging
+import socket
 import struct
+import sys
 import time
+from argparse import ArgumentParser
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from pathlib import Path
-from argparse import ArgumentParser
 from enum import Enum
+from functools import cached_property, wraps
+from os import PathLike
+from pathlib import Path
 from threading import Thread
 from typing import Any, Generator
 
@@ -26,8 +25,9 @@ logger.addHandler(handler)
 
 
 class TList(list):
-    low = ord('-')
-    high = ord('9')
+    low = ord("-")
+    high = ord("9")
+
     def __getitem__(self, idx):
         if isinstance(idx, str):
             assert len(idx) == 1
@@ -65,7 +65,9 @@ class Trie:
     root: TrieNode
     empty = True
     error_0_0 = ValueError("The ID specified in XADD must be greater than 0-0")
-    error_key_lt_last_key = ValueError("The ID specified in XADD is equal or smaller than the target stream top item")
+    error_key_lt_last_key = ValueError(
+        "The ID specified in XADD is equal or smaller than the target stream top item"
+    )
 
     def __init__(self):
         self.root = TrieNode()
@@ -80,7 +82,7 @@ class Trie:
         return curr, 0
 
     def _gen_next_seq(self, key: str):
-        ms = int(key.split('-')[0])
+        ms = int(key.split("-")[0])
         pms, pseq = self.last_key
         if ms < pms:
             raise self.error_key_lt_last_key
@@ -140,7 +142,9 @@ class Trie:
         self.empty = False
         return key
 
-    def _search(self, node: TrieNode, curr="") -> Generator[tuple[str, dict], None, None]:
+    def _search(
+        self, node: TrieNode, curr=""
+    ) -> Generator[tuple[str, dict], None, None]:
         if node.ends:
             yield (curr, node.data)
 
@@ -167,12 +171,12 @@ class Trie:
             yield key, node.data
 
         for i, node in enumerate(node.children):
-            if not node: continue
-            yield from self._all(node, key + chr(ord("-") + i));
+            if not node:
+                continue
+            yield from self._all(node, key + chr(ord("-") + i))
 
     def all(self):
         return self._all(self.root)
-
 
 
 class ErrorType(Enum):
@@ -267,62 +271,76 @@ class BulkString(str):
 
 
 def skip(f, free):
-    if free :
+    if free:
         f.read(free)
 
 
-def to_datetime(usecs_since_epoch):
-    seconds_since_epoch = usecs_since_epoch // 1000000
+def to_datetime(usecs_since_epoch: int) -> datetime:
+    seconds_since_epoch = usecs_since_epoch // int(1e6)
     seconds_since_epoch = min(seconds_since_epoch, 221925052800)
-    useconds = usecs_since_epoch % 1000000
+    useconds = usecs_since_epoch % int(1e6)
     dt = datetime.utcfromtimestamp(seconds_since_epoch)
-    delta = timedelta(microseconds = useconds)
+    delta = timedelta(microseconds=useconds)
     return dt + delta
 
 
 def read_char(f):
-    return struct.unpack('b', f.read(1))[0]
+    return struct.unpack("b", f.read(1))[0]
+
 
 def read_uchar(f):
-    return struct.unpack('B', f.read(1))[0]
+    return struct.unpack("B", f.read(1))[0]
+
 
 def read_short(f):
-    return struct.unpack('h', f.read(2))[0]
+    return struct.unpack("h", f.read(2))[0]
+
 
 def read_ushort(f):
-    return struct.unpack('H', f.read(2))[0]
+    return struct.unpack("H", f.read(2))[0]
+
 
 def read_int(f):
-    return struct.unpack('i', f.read(4))[0]
+    return struct.unpack("i", f.read(4))[0]
+
 
 def read_uint(f):
-    return struct.unpack('I', f.read(4))[0]
+    return struct.unpack("I", f.read(4))[0]
+
 
 def read_uint_be(f):
-    return struct.unpack('>I', f.read(4))[0]
+    return struct.unpack(">I", f.read(4))[0]
+
 
 def read_24bit_signed_number(f):
-    s = b'0' + f.read(3)
-    num = struct.unpack('i', s)[0]
+    s = b"0" + f.read(3)
+    num = struct.unpack("i", s)[0]
     return num >> 8
 
+
 def read_long(f):
-    return struct.unpack('q', f.read(8))[0]
+    return struct.unpack("q", f.read(8))[0]
+
 
 def read_ulong(f):
-    return struct.unpack('Q', f.read(8))[0]
+    return struct.unpack("Q", f.read(8))[0]
+
 
 def read_ms_time(f):
     return to_datetime(read_ulong(f) * 1000)
 
+
 def read_ulong_be(f):
-    return struct.unpack('>Q', f.read(8))[0]
+    return struct.unpack(">Q", f.read(8))[0]
+
 
 def read_binary_double(f):
-    return struct.unpack('d', f.read(8))[0]
+    return struct.unpack("d", f.read(8))[0]
+
 
 def read_binary_float(f):
-    return struct.unpack('f', f.read(4))[0]
+    return struct.unpack("f", f.read(4))[0]
+
 
 def string_as_hexcode(string):
     for s in string:
@@ -334,6 +352,7 @@ def string_as_hexcode(string):
 
 class Redis:
     config = {}
+
     def __init__(self):
         # TODO: consider mutex
         self.store = {}
@@ -381,40 +400,33 @@ class Redis:
             case x:
                 raise NotImplementedError("[entry_type]", f"{x!r} not yet parsed")
 
-
-    def set(self, key, val, *px) -> str:
+    def set(self, key, val, expiry: int | datetime | None = None) -> str:
         self.store[key] = val
-        if px:
-            assert len(px) == 2, f"Invalid {px=} passed to set"
-            assert px[0].lower() == "px", f"Invalid command passed to `set` {px=}"
-            _exp = px[-1]
-            if _exp is None:
-                return "OK"
+        if isinstance(expiry, int):
+            now = time.time_ns() // 1000
+            expiry = now + expiry
+            expiry = to_datetime(expiry)
 
-            if isinstance(_exp, datetime):
-                curr = datetime.now()
-                # consider for tests where rdb will parse datetime
-                if _exp > curr:
-                    self._ts[key] = ((_exp - curr).total_seconds() * 1000, time.time_ns() // int(1e6))
-                else:
-                    logger.warning(f"Not setting {key=}, {val=} since its expiry {_exp} <= {curr=}")
-                    del self.store[key]
-            else:
-                exp = int(_exp)
-                self._ts[key] = (exp, time.time_ns() // int(1e6))
+        if isinstance(expiry, datetime):
+            self._ts[key] = expiry
+            curr = datetime.now()
+            if expiry < curr:
+                logger.warning(
+                    f"Not setting {key=}, {val=} since its expiry {expiry} <= {curr=}"
+                )
+                del self.store[key]
+                del self._ts[key]
+
         return "OK"
 
     def _get(self, key: str):
         ts = self._ts.get(key)
-        if ts:
-            curr = time.time_ns() // int(1e6)
-            exp, then = ts
-            is_valid = curr - then <= exp
-            # TODO: handle passive removal of keys
-            if not is_valid:
-                del self._ts[key]
-                del self.store[key]
-                return None
+        curr = datetime.now()
+        # TODO: handle passive removal of keys
+        if ts and ts <= curr:
+            del self._ts[key]
+            del self.store[key]
+            return None
 
         return self.store.get(key)
 
@@ -635,7 +647,6 @@ class Redis:
         node_key = trie_.insert(node_key, data_)
         return node_key
 
-
     def dict_to_list(self, data: dict):
         rv = []
         for k, v in data.items():
@@ -643,7 +654,7 @@ class Redis:
 
         return rv
 
-    def xrange(self, key: str, start: str, end: str, start_xlsv = False):
+    def xrange(self, key: str, start: str, end: str, start_xlsv=False):
         trie: Trie = self.store.get(key)  # type: ignore
         if not trie:
             raise ValueError(f"{key=} is not set currently")
@@ -651,7 +662,7 @@ class Redis:
         items = trie.all()
         has_start = start != "-"
         has_end = end != "+"
-        min_seq, max_seq = 0, (1<<64) - 1
+        min_seq, max_seq = 0, (1 << 64) - 1
         if has_start and "-" not in start:
             start += f"-{min_seq}"
 
@@ -669,37 +680,62 @@ class Redis:
             ms, seq = map(int, key.split("-"))
             condition = True
             if has_end:
-                condition = condition and (ms, seq) <= end_i
+                condition = condition and (ms, seq) <= end_i  # type: ignore
             if has_start:
                 if start_xlsv:
-                    condition = condition and start_i < (ms, seq)
+                    condition = condition and start_i < (ms, seq)  # type: ignore
                 else:
-                    condition = condition and start_i <= (ms, seq)
+                    condition = condition and start_i <= (ms, seq)  # type: ignore
 
             if condition:
                 rv.append([key, self.dict_to_list(data)])
 
         return rv
 
-    def xread(self, count: int | None, block: int | None, *streams):
+    def xread(
+        self, count: int | None, block: int | None, *streams
+    ) -> list | Generator[list, None, None] | None:
+        def query(pairs: list[tuple]):
+            rv = []
+            for name, start in pairs:
+                # consider parsing '$' as the special flag instead of a key inside the trie
+                got = self.xrange(name, start, "+", start_xlsv=True)
+                if got:
+                    rv.append([name, got])
+
+            return rv or None
+
+        def block_call(pairs: list[tuple]):
+            while True:
+                time.sleep(0.1)
+                got = query(pairs)
+                if got:
+                    yield got
+
         n = len(streams)
-        assert n % 2 == 0, "There should be even number of streams and corresponding Ids"
-        rv = []
-        pairs = [(name, start) for name, start in zip(streams[:n//2], streams[n//2:])]
-        if block is not None:
+        assert (
+            n % 2 == 0
+        ), "There should be even number of streams and corresponding Ids"
+        pairs = [
+            (name, start) for name, start in zip(streams[: n // 2], streams[n // 2 :])
+        ]
+        logger.debug(f"xread: {count=} | {block=} | {pairs=}")
+        if block:  # ignore 0 and None
+            logger.debug(f"xread: Blocking for {block!r}")
+            time.sleep(block // int(1e3))  # ms -> sec
+
+        if block == 0:
             # TODO: handle 0 where the wait should be inf
-            time.sleep(block//int(1e3))
+            logger.debug(f"xread: Blocking indefinitely")
+            return block_call(pairs)
 
-        for name, start in pairs:
-            got = self.xrange(name, start, "+", start_xlsv=True)
-            if got:
-                rv.append([name, got])
-
-        return rv or BulkString(3, "nil")
+        got = query(pairs)
+        logger.debug(f"xread: returning response: {got!r}")
+        return got
 
     @classmethod
     def _aof_file(cls):
-        return Path(cls.config.get('aof', 'redis.aof'))
+        return Path(cls.config.get("aof", "redis.aof"))
 
     @classmethod
     def _rdb_file(cls) -> PathLike:
@@ -762,45 +798,59 @@ class rdb_consts:
     TYPE_LIST_QUICKLIST = 14
     TYPE_STREAM_LISTPACKS = 15
 
-    DATA_TYPE_MAPPING = {0 : "string", 1 : "list", 2 : "set", 3 : "sortedset", 4 : "hash", 9 : "hash", 10 : "list", 11 : "set", 12 : "sortedset", 13 : "hash", 14 : "list", 15 : "stream"}
+    DATA_TYPE_MAPPING = {
+        0: "string",
+        1: "list",
+        2: "set",
+        3: "sortedset",
+        4: "hash",
+        9: "hash",
+        10: "list",
+        11: "set",
+        12: "sortedset",
+        13: "hash",
+        14: "list",
+        15: "stream",
+    }
 
 
 class RdbParser:
     """
-----------------------------#
-52 45 44 49 53              # Magic String "REDIS"
-30 30 30 33                 # RDB Version Number as ASCII string. "0003" = 3
-----------------------------
-FA                          # Auxiliary field
-$string-encoded-key         # May contain arbitrary metadata
-$string-encoded-value       # such as Redis version, creation time, used memory, ...
-----------------------------
-FE 00                       # Indicates database selector. db number = 00
-FB                          # Indicates a resizedb field
-$length-encoded-int         # Size of the corresponding hash table
-$length-encoded-int         # Size of the corresponding expire hash table
-----------------------------# Key-Value pair starts
-FD $unsigned-int            # "expiry time in seconds", followed by 4 byte unsigned int
-$value-type                 # 1 byte flag indicating the type of value
-$string-encoded-key         # The key, encoded as a redis string
-$encoded-value              # The value, encoding depends on $value-type
-----------------------------
-FC $unsigned long           # "expiry time in ms", followed by 8 byte unsigned long
-$value-type                 # 1 byte flag indicating the type of value
-$string-encoded-key         # The key, encoded as a redis string
-$encoded-value              # The value, encoding depends on $value-type
-----------------------------
-$value-type                 # key-value pair without expiry
-$string-encoded-key
-$encoded-value
-----------------------------
-FE $length-encoding         # Previous db ends, next db starts.
-----------------------------
-...                         # Additional key-value pairs, databases, ...
+    ----------------------------#
+    52 45 44 49 53              # Magic String "REDIS"
+    30 30 30 33                 # RDB Version Number as ASCII string. "0003" = 3
+    ----------------------------
+    FA                          # Auxiliary field
+    $string-encoded-key         # May contain arbitrary metadata
+    $string-encoded-value       # such as Redis version, creation time, used memory, ...
+    ----------------------------
+    FE 00                       # Indicates database selector. db number = 00
+    FB                          # Indicates a resizedb field
+    $length-encoded-int         # Size of the corresponding hash table
+    $length-encoded-int         # Size of the corresponding expire hash table
+    ----------------------------# Key-Value pair starts
+    FD $unsigned-int            # "expiry time in seconds", followed by 4 byte unsigned int
+    $value-type                 # 1 byte flag indicating the type of value
+    $string-encoded-key         # The key, encoded as a redis string
+    $encoded-value              # The value, encoding depends on $value-type
+    ----------------------------
+    FC $unsigned long           # "expiry time in ms", followed by 8 byte unsigned long
+    $value-type                 # 1 byte flag indicating the type of value
+    $string-encoded-key         # The key, encoded as a redis string
+    $encoded-value              # The value, encoding depends on $value-type
+    ----------------------------
+    $value-type                 # key-value pair without expiry
+    $string-encoded-key
+    $encoded-value
+    ----------------------------
+    FE $length-encoding         # Previous db ends, next db starts.
+    ----------------------------
+    ...                         # Additional key-value pairs, databases, ...
 
-FF                          ## End of RDB file indicator
-8-byte-checksum             ## CRC64 checksum of the entire file.
+    FF                          ## End of RDB file indicator
+    8-byte-checksum             ## CRC64 checksum of the entire file.
     """
+
     def __init__(self, path: str | PathLike, store: Redis | None = None) -> None:
         self._f = Path(path)
         self._store = store or Redis()
@@ -810,10 +860,10 @@ FF                          ## End of RDB file indicator
         if not self._f.exists():
             return self._store
 
-        with self._f.open('rb') as f:
+        with self._f.open("rb") as f:
             logger.debug(f"file content: {f.read()}")
 
-        with self._f.open('rb') as f:
+        with self._f.open("rb") as f:
             self._verify_magic_string(f)
             self._verify_version(f)
             return self._parse(f)
@@ -833,7 +883,7 @@ FF                          ## End of RDB file indicator
                 return self._parse(f)
             case rdb_consts.OPCODE_EXPIRETIME:
                 logger.debug("parsing expiry time")
-                expiry = to_datetime(read_uint(f) * 1000000)
+                expiry = to_datetime(read_uint(f) * int(1e6))
                 logger.debug(f"SECONDS: {expiry=}")
                 value_type = read_uchar(f)
                 self._parse_key_value(f, value_type, expiry)
@@ -866,8 +916,8 @@ FF                          ## End of RDB file indicator
         logger.debug(f"Parsing magic string")
         magic_string = f.read(5)
         logger.debug(f"{magic_string=}")
-        if magic_string != b'REDIS':
-            raise Exception('verify_magic_string', 'Invalid File Format')
+        if magic_string != b"REDIS":
+            raise Exception("verify_magic_string", "Invalid File Format")
 
     def _verify_version(self, f: io.BufferedReader):
         logger.debug(f"Parsing version")
@@ -875,7 +925,7 @@ FF                          ## End of RDB file indicator
         version = int(version_str)
         logger.debug(f"{version_str=} | {version=}")
         if version < 1 or version > 9:
-            raise Exception('verify_version', 'Invalid RDB version number %d' % version)
+            raise Exception("verify_version", "Invalid RDB version number %d" % version)
         self.rdb_version = version
 
     def _parse_db_selector(self, f: io.BufferedReader):
@@ -895,7 +945,9 @@ FF                          ## End of RDB file indicator
         logger.debug(f"Aux string {value=}")
         return {key: value}
 
-    def _parse_key_value(self, f: io.BufferedReader, value_type, expiry: datetime | None = None):
+    def _parse_key_value(
+        self, f: io.BufferedReader, value_type, expiry: datetime | None = None
+    ):
         # TODO: parse expired values
         logger.debug(f"{value_type=}")
         key = self._parse_str(f)
@@ -905,9 +957,11 @@ FF                          ## End of RDB file indicator
             case rdb_consts.TYPE_STRING:
                 value = self._parse_str(f)
                 logger.debug(f"PARSING TYPE STRING: {key=} {value=} {expiry=}")
-                self._store.set(key, value, "px", expiry)
+                self._store.set(key, value, expiry)
             case x:
-                raise NotImplementedError("[_parse_key_value]", f"not implemented yet! {x!r}")
+                raise NotImplementedError(
+                    "[_parse_key_value]", f"not implemented yet! {x!r}"
+                )
 
     def _parse_str(self, f: io.BufferedReader):
         length, is_encoded = self._parse_length(f)
@@ -915,7 +969,7 @@ FF                          ## End of RDB file indicator
         if not is_encoded:
             content = f.read(length)
             logger.debug(f"Got string {content=}")
-            return content.decode('utf-8')
+            return content.decode("utf-8")
 
         match length:
             case rdb_consts.ENC_INT8:
@@ -935,13 +989,10 @@ FF                          ## End of RDB file indicator
                 # val = lzf.decompress(f.read(clen), uncomp_len)
                 raise NotImplementedError(
                     "_parse_str",
-                    f"compressed string: {rdb_consts.ENC_LZF!r} {clen=}, {uncomp_len=}, {bytes_=}"
+                    f"compressed string: {rdb_consts.ENC_LZF!r} {clen=}, {uncomp_len=}, {bytes_=}",
                 )
             case x:
-                raise NotImplementedError(
-                    "_parse_str",
-                    f"Unknown string type: {x!r}"
-                )
+                raise NotImplementedError("_parse_str", f"Unknown string type: {x!r}")
 
     def _parse_length(self, f: io.BufferedReader) -> tuple[int, bool]:
         first_byte = read_uchar(f)
@@ -968,7 +1019,6 @@ FF                          ## End of RDB file indicator
                 return (first_byte & lsb6), True
             case x:
                 raise NotImplementedError(f"[_parse_length] Unknown msb: {x!r}")
-
 
 
 class CommandType(Enum):
@@ -1007,7 +1057,9 @@ class CommandType(Enum):
     Xrange = "XRANGE"
     Xread = "XREAD"
 
-    Error = "Error"  # required for internal use
+    # required for internal use
+    Blocking = "BLOCKING"
+    Error = "Error"
 
     def __eq__(self, o):
         if isinstance(o, str):
@@ -1282,7 +1334,9 @@ def handle_exceptions(func):
 
 
 @handle_exceptions
-def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType | None, Any]:
+def handle_command(
+    command: str, body: list, store: Redis
+) -> tuple[CommandType, str | map]:
     match command.upper():
         case CommandType.Ping:
             return CommandType.Ping, serialize_data("PONG")
@@ -1294,7 +1348,12 @@ def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType 
             rv = serialize_data(resp)
             return CommandType.Exists, rv
         case CommandType.Set:
-            resp = store.set(body[0], body[1], *body[2:])
+            args = body[2:]
+            expiry = None
+            if args and args[0].lower() == "px":
+                expiry = int(args[1]) * 1000
+
+            resp = store.set(body[0], body[1], expiry)
             rv = serialize_data(resp)
             return CommandType.Set, rv
         case CommandType.Get:
@@ -1425,11 +1484,17 @@ def handle_command(command: str, body: list, store: Redis) -> tuple[CommandType 
             if "count" in lowered:
                 block = int(lowered[lowered.index("count") + 1])
 
-            logger.debug(f"{block=} | {count=} | {stream_start=} | {lowered=}")
-            resp = store.xread(count, block, *body[stream_start:])
+            logger.debug(
+                f"[handle_command]: XREAD: {block=} | {count=} | {stream_start=} | {lowered=}"
+            )
+            resp = store.xread(count, block, *streams)
+            logger.debug(f"[handle_command]: XREAD: got {resp=}")
+            if isinstance(resp, Generator):
+                return CommandType.Blocking, map(serialize_data, resp)
+
             return CommandType.Xread, serialize_data(resp)
-        case _:
-            return None, serialize_error(Error("Invalid command: {command=} | {body=}"))
+        case x:
+            raise NotImplementedError("[handle_command]", f"NotImplementedError: {x=}")
 
 
 def parse_aof(store: Redis):
@@ -1439,9 +1504,10 @@ def parse_aof(store: Redis):
 
     rv = []
     hist = aof.read_text()
-    for query in hist.split('\n'):
-        if not query: continue
-        data = query.replace('\\r\\n', '\r\n')
+    for query in hist.split("\n"):
+        if not query:
+            continue
+        data = query.replace("\\r\\n", "\r\n")
         tokens = parse_crlf(data)
         res: list = parse_data(tokens)  # type: ignore
         try:
@@ -1456,7 +1522,6 @@ def parse_aof(store: Redis):
 def recover(store: Redis):
     parse_aof(store)
     RdbParser(store._rdb_file(), store).parse()
-
 
 
 def get_response(data, store: Redis):
@@ -1494,10 +1559,14 @@ def handle_client(client: socket.socket, store: Redis):
         logger.debug(f"Got data: {data=}")
         try:
             ctype, res = get_response(data, store)
-            logger.debug(f"Response: {res=}")
-            client.sendall(res.encode("utf-8"))
-            if ctype is None:
-                break
+            # handle blocking commands like xread with block = 0
+            if ctype == CommandType.Blocking:
+                logger.debug(f"handle_client: blocking call got {res=}")
+                for item in res:
+                    client.sendall(item.encode("utf-8"))
+            else:
+                logger.debug(f"handle_client: Response: {res=}")
+                client.sendall(res.encode("utf-8"))  # type: ignore
         except Exception as e:
             logger.exception(f"Invalid command: {data}. Failed with error: {e}")
             break
@@ -1527,8 +1596,8 @@ def main(argv: list[str] | None = None):
 
     store = Redis()
     if args.dir or args.dbfilename:
-        Redis.config['dir'] = args.dir
-        Redis.config['dbfilename'] = args.dbfilename
+        Redis.config["dir"] = args.dir
+        Redis.config["dbfilename"] = args.dbfilename
 
     if args.serve:
         host = "localhost"

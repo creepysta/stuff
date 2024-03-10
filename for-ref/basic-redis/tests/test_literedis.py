@@ -1,18 +1,19 @@
+from pathlib import Path
+
 import pytest
 
-from pathlib import Path
 from literedis import (
     BulkString,
     CommandType,
     Error,
+    RdbParser,
     Redis,
     Trie,
     handle_command,
     parse_crlf,
     parse_data,
-    serialize_data,
     recover,
-    RdbParser
+    serialize_data,
 )
 
 int_data = [
@@ -78,9 +79,9 @@ save_cmds = [
     (["SET", BulkString(3, "Foo"), 1], 1),
     (["INCR", BulkString(3, "Foo")], 1),
     (["DECR", BulkString(3, "Foo")], -1),
-    (["LPUSH", BulkString(3, "Foo"), 1, 2, 3], [3,2,1]),
-    (["RPUSH", BulkString(3, "Foo"), 1, 2, 3], [1,2,3]),
-    (["HSET",  "Foo", "Foo", "Bar", "Bar", "Baz"], {"Foo": "Bar", "Bar": "Baz"}),
+    (["LPUSH", BulkString(3, "Foo"), 1, 2, 3], [3, 2, 1]),
+    (["RPUSH", BulkString(3, "Foo"), 1, 2, 3], [1, 2, 3]),
+    (["HSET", "Foo", "Foo", "Bar", "Bar", "Baz"], {"Foo": "Bar", "Bar": "Baz"}),
     (["SADD", "Foo", "foo:2", "bar"], {"foo:2", "bar"}),
 ]
 
@@ -92,7 +93,7 @@ def store():
 
 @pytest.fixture
 def aof_file():
-    aof = Path('redis.aof')
+    aof = Path("redis.aof")
     yield aof
     aof.write_text("")
 
@@ -422,9 +423,6 @@ def test_smembers(store: Redis):
 def test_xadd(store: Redis):
     cmd_type, res = handle_command("XADD", ["stream_key", "0-1", "foo", "bar"], store)
     rv = parse_data(parse_crlf(res))
-    print(rv)
-    print(store.store.get("stream_key"))
-    print(list(store.store.get("stream_key").search("0-1")))
     assert cmd_type == CommandType.Xadd
     assert rv == "0-1"
     trie_ = store.store.get("stream_key")
@@ -436,6 +434,14 @@ def test_xadd(store: Redis):
     key, data_ = data[0]
     assert data_ == {"foo": "bar"}
     assert key == "0-1"
+
+
+def test_xread(store: Redis):
+    handle_command("XADD", ["stream_key", "0-1", "foo", "bar"], store)
+    cmd_type, res = handle_command("XREAD", ["streams", "stream_key", "0-0"], store)
+    rv = parse_data(parse_crlf(res))
+    # print(cmd_type, rv)
+    assert rv == [["stream_key", [["0-1", ["foo", "bar"]]]]]
 
 
 def test_rdb():
