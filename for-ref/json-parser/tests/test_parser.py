@@ -40,6 +40,26 @@ def test_basics(data, expected):
     assert got == expected
 
 
+@pytest.mark.parametrize("data,expected", [
+    ("nullasd", (None, 'asd')),
+    ("truefalse", (True, 'false')),
+    ("falsenullasd", (False, 'nullasd')),
+    ("123123.123 asdas", (123123, '.123 asdas')),
+    ('"hello, world!"sasd123', ("hello, world!", 'sasd123')),
+    ('""asd', ("", 'asd')),
+    ('asd', None),
+    ("[], ]  asd", ([], ', ]  asd')),
+    ("{} a asd", ({}, ' a asd')),
+    ('[123, "foo bar", [true, null, [false,], 231], "baz", []] asd', ([123, "foo bar", [True, None, [False,], 231,], "baz", [],], ' asd')),
+    ('{"foo": ["bar", ["baz"], {"hello": "world"}, {},], "empty": {}, "NullableKey": null, "true": false, "key": "value"}a asdas', ({"foo": ["bar", ["baz"], {"hello": "world"}, {},], "empty": {}, "NullableKey": None, "true": False, "key": "value"}, 'a asdas')),
+    ('[123, "foo bar",  asd  ]', None),
+    ('{"foo": ["bar", ["baz"], {"hello": "world"}, {},], a asdas}', None),
+])
+def test_basics_extra(data, expected):
+    got = json_p()(data)
+    assert got == expected
+
+
 # @pytest.mark.parametrize("name,content,expected_ec", basics_params)
 # def test_files(name, content, expected_ec):
 #     for name, content, expected_ec in basics():
