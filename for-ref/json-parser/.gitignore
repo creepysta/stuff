@@ -1,1 +1,4 @@
 __pycache__/
+build/
+dist/
+json_parser.egg-info/

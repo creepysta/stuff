@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name="literedis",
     version="0.0.1",
-    description="A very lite async http server",
+    description="small implementation of redis",
     author="creepysta",
     author_email="travisparker.thechoice93@gmail.com",
     py_modules=["literedis"],
