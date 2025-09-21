@@ -18,3 +18,10 @@ $ tar -xvf maelstrom.tar.bz2
 $ export PATH=$(pwd)/maelstrom/:$PATH
 ```
 
+
+### Debugging -
+
+```bash
+$ maelstrom serve
+```
+

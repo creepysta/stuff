@@ -440,7 +440,7 @@ def test_xread(store: Redis):
     handle_command("XADD", ["stream_key", "0-1", "foo", "bar"], store)
     cmd_type, res = handle_command("XREAD", ["streams", "stream_key", "0-0"], store)
     rv = parse_data(parse_crlf(res))
-    # print(cmd_type, rv)
+    print(cmd_type, rv)
     assert rv == [["stream_key", [["0-1", ["foo", "bar"]]]]]
 
 

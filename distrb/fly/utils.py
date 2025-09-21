@@ -4,6 +4,10 @@ from copy import deepcopy
 from typing import Callable, Type
 
 
+def read():
+    return input()
+
+
 def send(msg: str):
     sys.stdout.write(msg + "\n")
     sys.stdout.flush()
@@ -142,9 +146,14 @@ class Node:
 
         self._relayed[msg.message_content] = True
 
+    def gossip(self):
+        for node in self.connections:
+            pass
+
+
 
 def handler(msg_type: Type[Msg], node: Node) -> dict | None:
-    got = input()
+    got = read()
     msg = msg_type(json.loads(got))
     reply = node.reply(msg)
     log(f"GOT MESSAGE: {msg} | {reply=}")
@@ -156,7 +165,7 @@ def serve(
 ) -> None:
     assert msg_type or handle_fn and not all([msg_type, handle_fn])
 
-    got = input()
+    got = read()
     msg = Init(json.loads(got))
     assert msg.type == "init"
     node = Node(msg)

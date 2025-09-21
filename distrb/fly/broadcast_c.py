@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 import json
 
-from utils import Msg, Node, send, serve
+from utils import Msg, Node, read, send, serve
 
 
 class Broadcast(Msg):
-    @property
-    def message_val(self):
-        return self.body.get("message")
-
     @property
     def topology(self):
         return self.body.get("topology")
@@ -30,7 +26,7 @@ class Broadcast(Msg):
 
 
 def handle(node: Node):
-    got = input()
+    got = read()
     msg = Broadcast(json.loads(got))
 
     match msg.type:
@@ -42,10 +38,20 @@ def handle(node: Node):
             send(json.dumps(reply))
             return
         case "read":
-            contents = [x.message_content for x in node.all_received]
+            # contents = [x.message_content for x in node.all_received]
             msg = msg.reply(node.node_id, node.all_received)
             send(json.dumps(msg))
             return
 
 
 serve(handle_fn=handle)
+
+
+
+"""
+maelstrom test -w broadcast --bin ./broadcast_c.py \
+    --node-count 5 \
+    --time-limit 20 \
+    --rate 10 \
+    --nemesis partition
+"""

@@ -73,8 +73,10 @@ e["foo"]["bar"]["str"] = "foo"
 e["foo"]["bar"] = "1"
 e["foo"]["bar"] = 99
 
+puts "Nested Entry"
 p! e["foo"]["bar"]["int"]
 p! e["foo"]["bar"]
+p! e["foo"]["baz"]
 
 require "spec"
 
@@ -92,5 +94,13 @@ describe "Entry" do
     e["foo"].value.should eq 3
     e["foo"]["baz"].value.should eq "foo"
     e["foo"]["bar"].value.should eq "foo"
+  end
+end
+
+describe "List Slice" do
+  puts "List Slice"
+  it "" do
+    list = (1..6).to_a
+    p! list, list[1..4], list[1...4]
   end
 end

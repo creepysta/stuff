@@ -7,3 +7,8 @@ class Echo(Msg):
 
 
 serve(Echo)
+
+
+"""
+maelstrom test -w echo --bin ./echo.py --node-count 1 --time-limit 10
+"""
